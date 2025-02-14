@@ -27,6 +27,10 @@ KV-Shifting attention - [link](https://arxiv.org/abs/2411.19574) - seems to impr
 
 Dilated Attention (LongNet) - [link](https://arxiv.org/pdf/2307.02486)
 
+Multi-Head Latent Attention - [link](https://arxiv.org/abs/2502.07864) - loss: `3.3479` - peak memory consumption: `42192 MiB`
+
+Per token output bias - [link]() - loss: `3.3257` - peak memory consumption: `42120 MiB`
+
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
 
