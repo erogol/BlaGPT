@@ -130,6 +130,53 @@ class DistributedDataLoader:
 
 
 # -----------------------------------------------------------------------------
+# Hyperparameters
+
+
+@dataclass
+class Hyperparameters(Coqpit):
+    run_name: str = "nano_gpt+rms_norm+geglu+gqa+softcap"
+    compile_model: bool = True
+    # data hyperparams
+    input_bin: str = "../data/fineweb10B/fineweb_train_*.bin"  # input .bin to train on
+    input_val_bin: str = (
+        "../data/fineweb10B/fineweb_val_*.bin"  # input .bin to eval validation loss on
+    )
+
+    # training
+    batch_size: int = 8 * 64  # batch size, in sequences, across all devices
+    device_batch_size: int = 32  # batch size, in sequences, per device, grad_accum_steps = batch_size // num_devices /// device_batch_size
+    sequence_length: int = 1024  # sequence length, in tokens
+    num_iterations: int = 5100  # number of iterations to run
+
+    # optimizer
+    optimizer_name: str = "Adam"
+    optimizer_args: dict = field(
+        default_factory=lambda: {
+            "betas": (0.9, 0.95),
+            "eps": 1e-8,
+            "weight_decay": 0.0,
+        }
+    )
+    learning_rate: float = 0.001
+    warmup_iters: int = 250
+    warmdown_iters: int = 2000  # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule
+
+    # evaluation and logging hyperparams
+    val_loss_every: int = (
+        125  # every how many steps to evaluate val loss? 0 for only at the end
+    )
+    val_tokens: int = 10485760  # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
+    save_every: int = (
+        5000  # every how many steps to save the checkpoint? 0 for only at the end
+    )
+
+    # checkpoint params
+    keep_last_n_checkpoints: int = 1  # number of checkpoints to keep
+    save_best_model: bool = True  # whether to save best model based on val loss
+
+
+# -----------------------------------------------------------------------------
 # int main
 
 if __name__ == "__main__":
@@ -140,48 +187,6 @@ if __name__ == "__main__":
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--model_name", type=str, default="bla_gpt")
     cli_args = parser.parse_args()
-
-    @dataclass
-    class Hyperparameters(Coqpit):
-        run_name: str = "nano_gpt+rms_norm+geglu+gqa+softcap"
-        compile_model: bool = True
-        # data hyperparams
-        input_bin: str = (
-            "../data/fineweb10B/fineweb_train_*.bin"  # input .bin to train on
-        )
-        input_val_bin: str = "../data/fineweb10B/fineweb_val_*.bin"  # input .bin to eval validation loss on
-
-        # training
-        batch_size: int = 8 * 64  # batch size, in sequences, across all devices
-        device_batch_size: int = 32  # batch size, in sequences, per device, grad_accum_steps = batch_size // num_devices /// device_batch_size
-        sequence_length: int = 1024  # sequence length, in tokens
-        num_iterations: int = 5100  # number of iterations to run
-
-        # optimizer
-        optimizer_name: str = "Adam"
-        optimizer_args: dict = field(
-            default_factory=lambda: {
-                "betas": (0.9, 0.95),
-                "eps": 1e-8,
-                "weight_decay": 0.0,
-            }
-        )
-        learning_rate: float = 0.001
-        warmup_iters: int = 250
-        warmdown_iters: int = 2000  # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule
-
-        # evaluation and logging hyperparams
-        val_loss_every: int = (
-            125  # every how many steps to evaluate val loss? 0 for only at the end
-        )
-        val_tokens: int = 10485760  # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-        save_every: int = (
-            5000  # every how many steps to save the checkpoint? 0 for only at the end
-        )
-
-        # checkpoint params
-        keep_last_n_checkpoints: int = 1  # number of checkpoints to keep
-        save_best_model: bool = True  # whether to save best model based on val loss
 
     args = Hyperparameters()
     model_config, model = get_model(cli_args.model_name)
