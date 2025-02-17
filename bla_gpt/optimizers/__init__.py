@@ -66,6 +66,9 @@ def get_optimizer(
         optimizer.attn_proj_names.add("c_proj")
 
         return optimizer
+    elif optimizer_name.lower() == "mars":
+        module = importlib.import_module("optimizers.mars")
+        optimizer = getattr(module, "MARS")
     else:
         optimizer = getattr(torch.optim, optimizer_name)
     return optimizer(parameters, lr=lr, **optimizer_params)
