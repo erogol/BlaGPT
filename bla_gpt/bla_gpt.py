@@ -18,11 +18,12 @@ from attentions import (
     DilatedAttention,
     KVShiftingAttention,
     MultiheadDiffAttn,
+    MultiHeadLatentAttention,
     PattentionSelfAttention,
     soft_cap,
 )
 from coqpit import Coqpit
-from mlps import MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, SwiGLU_MLP
+from mlps import MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, Primer_MLP, SwiGLU_MLP
 from modules.pattention import Pattention
 from norms import LayerNorm, RMSNorm
 from torch.nn import functional as F
@@ -38,6 +39,7 @@ class GPTConfig(Coqpit):
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
+    n_latentd: int = 0  # 192  # only for MultiHeadLatentAttention
     dropout: float = 0.0
     bias: bool = True  # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
@@ -60,6 +62,9 @@ class GPTConfig(Coqpit):
     use_qkv_bias: bool = False  # from Qwen, for better length generalization. Not an issue with block_size=1024
     use_pre_post_norm: bool = False  # from Qwen, for better training stability
     rope_theta: float = 10000  # 1000000.0 in llama3 models
+    use_per_token_output_bias: bool = (
+        False  # use an embedding layer to add a bias to each token prediction
+    )
 
     # dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
@@ -148,6 +153,8 @@ def compute_z_loss(logits, dim=-1, eps=1e-20):
 def get_attention(config, depth=None):
     if config.attention == "regular":
         return Attention(config)
+    if config.attention == "latent":
+        return MultiHeadLatentAttention(config)
     elif config.attention == "DiffAttn":
         return MultiheadDiffAttn(config, depth)
     elif config.attention == "pattention":
@@ -174,6 +181,8 @@ def get_mlp(config):
         return GeGLU_MLP(config)
     elif config.activation == "swiglu":
         return SwiGLU_MLP(config)
+    elif config.activation == "primer":
+        return Primer_MLP(config)
     elif config.activation == "negout":
         return Negout_MLP(config)
     elif config.activation == "maxout":
@@ -274,6 +283,10 @@ class GPT(nn.Module):
                 self.lm_head.weight
             )  # https://paperswithcode.com/method/weight-tying
 
+        # optional per token bias
+        if config.use_per_token_output_bias:
+            self.output_bias_emb = nn.Embedding(config.vocab_size, config.n_embd)
+
         # init all weights
         self.apply(self._init_weights)
         # apply special scaled init to the residual projections, per GPT-2 paper
@@ -330,9 +343,13 @@ class GPT(nn.Module):
             x = block(x)
         x = self.transformer.ln_f(x)
 
+        # TODO: simplify this
         if targets is not None:
+            # single token prediction head
             # if we are given some desired targets also calculate the loss
             if hasattr(self, "lm_head"):
+                if self.config.use_per_token_output_bias:
+                    x = x + self.output_bias_emb(idx)
                 logits = self.lm_head(x)
                 logits = logits.float()
                 if self.soft_cap > 0.0:
@@ -352,10 +369,13 @@ class GPT(nn.Module):
                         "lm_loss": loss.detach().item(),
                     }
             else:
+                # multi-token prediction heads
                 total_loss = 0
                 loss_dict = {}
                 logits = []
                 for i, head in enumerate(self.prediction_heads):
+                    if self.config.use_per_token_output_bias:
+                        x = x + self.output_bias_emb(idx)
                     head_logits = head(x)  # (b, t, vocab_size)
                     logits.append(head_logits)
 

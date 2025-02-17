@@ -153,7 +153,7 @@ if __name__ == "__main__":
 
         # training
         batch_size: int = 8 * 64  # batch size, in sequences, across all devices
-        device_batch_size: int = 32  # batch size, in sequences, per device
+        device_batch_size: int = 32  # batch size, in sequences, per device, grad_accum_steps = batch_size // num_devices /// device_batch_size
         sequence_length: int = 1024  # sequence length, in tokens
         num_iterations: int = 5100  # number of iterations to run
 
@@ -260,7 +260,13 @@ if __name__ == "__main__":
         print(f"Number of trainable parameters: {num_trainable_parameters}")
 
     # here we wrap model into DDP container
-    model = DDP(model, device_ids=[ddp_local_rank], find_unused_parameters=True)
+    model = DDP(
+        model,
+        device_ids=[ddp_local_rank],
+        find_unused_parameters=True,
+        broadcast_buffers=False,
+        gradient_as_bucket_view=True,
+    )
     raw_model = model.module  # always contains the "raw" unwrapped model
     ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
 
