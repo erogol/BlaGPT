@@ -126,6 +126,19 @@ See one of the implementations for details.
 torchrun --standalone --nproc_per_node=8 train.py --run_name pre_post_norm --model_name blagpt
 ```
 
+- (Optinal) Run the learning rate finder before the training
+
+```bash
+torchrun --standalone --nproc_per_node=8 find_lr.py --model_name blagpt
+
+# Output
+Results:
+Steepest gradient learning rate: 3.31e-06
+Elbow point learning rate: 1.20e-01
+Plot saved to: logs/lr_finder_blagpt/lr_finder_plot.png
+Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
+```
+
 ## Acknowledgements
 
 The initial code is based on
