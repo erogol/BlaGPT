@@ -67,6 +67,8 @@ DeMo - [link](https://arxiv.org/abs/2411.19870) - Saves 7 GB per GPU, loss is hi
 
 Adam-Mini - [link]() - loss is higher than Adam and AdamW and also slower ??, saved a bit of VRAM  - loss: `3.3324`, peak VRAM: `41534 MiB`, step_time: `610ms`
 
+MARS - [link](https://github.com/AGI-Arena/MARS) - loss: `3.3459`, peak VRAM: 40953 MiB, step_time: `628ms`
+
 ## Best Model So Far
 BlaGPT with the following configurations:
 
