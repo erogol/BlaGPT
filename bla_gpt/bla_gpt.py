@@ -63,7 +63,7 @@ class GPTConfig(Coqpit):
     use_pre_post_norm: bool = False  # from Qwen, for better training stability
     rope_theta: float = 10000  # 1000000.0 in llama3 models
     use_per_token_output_bias: bool = (
-        True  # use an embedding layer to add a bias to each token prediction
+        False  # use an embedding layer to add a bias to each token prediction
     )
 
     # dilated attention parameters
