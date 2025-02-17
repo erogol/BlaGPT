@@ -2,7 +2,6 @@ import math
 
 import torch
 import torch.nn.functional as F
-from kernel.rotary import apply_rotary_emb as apply_rotary_emb_kernel
 from modules.pattention import Pattention
 from torch import nn
 from torch.nn import functional as F
@@ -20,31 +19,28 @@ def soft_cap(x, cap):
 
 def apply_rotary_emb(x, cos, sin):
     assert x.ndim == 4  # multihead attention
-    d = x.shape[3] // 2
-    x1 = x[..., :d]
-    x2 = x[..., d:]
-    y1 = x1 * cos + x2 * sin
-    y2 = x1 * (-sin) + x2 * cos
+    with torch.autocast(device_type=x.device.type, enabled=False):
+        d = x.shape[3] // 2
+        x1 = x[..., :d].float()
+        x2 = x[..., d:].float()
+        y1 = x1 * cos + x2 * sin
+        y2 = x1 * (-sin) + x2 * cos
     return torch.cat([y1, y2], 3).type_as(x)
 
 
 class Rotary(torch.nn.Module):
-    def __init__(self, dim, base=10000):
+    def __init__(self, dim, base=10000, seq_len=1024):
         super().__init__()
         self.inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
-        self.seq_len_cached = None
-        self.cos_cached = None
-        self.sin_cached = None
+        t = torch.arange(seq_len, device=self.inv_freq.device, dtype=torch.float32)
+        freqs = torch.outer(t, self.inv_freq)
+        self.cos = nn.Buffer(freqs.cos().float(), persistent=False)
+        self.sin = nn.Buffer(freqs.sin().float(), persistent=False)
 
     def forward(self, x):
-        seq_len = x.shape[1]
-        if seq_len != self.seq_len_cached:
-            self.seq_len_cached = seq_len
-            t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
-            freqs = torch.outer(t, self.inv_freq).to(x.device)
-            self.cos_cached = freqs.cos().bfloat16()
-            self.sin_cached = freqs.sin().bfloat16()
-        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]
+        return self.cos[None, : x.size(-3), None, :], self.sin[
+            None, : x.size(-3), None, :
+        ]
 
 
 class Attention(nn.Module):
@@ -211,6 +207,34 @@ class Attention(nn.Module):
     def _project_output(self, y, B, T_q, C):
         y = y.transpose(1, 2).contiguous().view(B, T_q, C)
         return self.resid_dropout(self.c_proj(y))
+
+
+class MultiHeadLatentAttention(Attention):
+    def __init__(self, config):
+        assert config.n_lantentd > 0, "Must provide number of latent dimensions"
+        self.n_latentd = config.n_latentd
+        super().__init__(config)
+
+    def set_layers(self, config):
+        self.q_proj = nn.Linear(
+            config.n_embd, config.n_embd, bias=config.bias or config.use_qkv_bias
+        )
+        self.kv_latent = nn.Linear(
+            config.n_embd,
+            self.n_latentd,
+            bias=config.bias or config.use_qkv_bias,
+        )
+        self.kv_proj = nn.Linear(
+            self.n_latentd,
+            2 * config.n_embd // (config.n_head // config.n_kv_head),
+            bias=config.bias or config.use_qkv_bias,
+        )
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+
+    def _project_kv(self, x, B, T):
+        kv = self.kv_latent(x)
+        kv = self.kv_proj(kv).view(B, T, 2, self.n_kv_head, self.head_dim)
+        return kv.unbind(dim=2)
 
 
 class PattentionSelfAttention(Attention):

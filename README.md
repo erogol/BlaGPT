@@ -27,6 +27,10 @@ KV-Shifting attention - [link](https://arxiv.org/abs/2411.19574) - seems to impr
 
 Dilated Attention (LongNet) - [link](https://arxiv.org/pdf/2307.02486)
 
+Multi-Head Latent Attention - [link](https://arxiv.org/abs/2502.07864) - loss: `3.3479` - peak memory consumption: `42192 MiB`
+
+Per token output bias - [link]() - loss: `3.3257` - peak memory consumption: `42120 MiB`
+
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
 
@@ -62,6 +66,8 @@ AdamW - loss: `3.3310`, peak VRAM: `42053 MiB`, step_time: `533ms`
 DeMo - [link](https://arxiv.org/abs/2411.19870) - Saves 7 GB per GPU, loss is higher than baseline, step time is slower than Adam -  loss: `3.4676`, peak VRAM: `41534 MiB`, step_time: `820ms`
 
 Adam-Mini - [link]() - loss is higher than Adam and AdamW and also slower ??, saved a bit of VRAM  - loss: `3.3324`, peak VRAM: `41534 MiB`, step_time: `610ms`
+
+MARS - [link](https://github.com/AGI-Arena/MARS) - loss: `3.3459`, peak VRAM: 40953 MiB, step_time: `628ms`
 
 ## Best Model So Far
 BlaGPT with the following configurations:
