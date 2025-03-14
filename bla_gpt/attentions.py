@@ -238,6 +238,10 @@ class MultiHeadLatentAttention(Attention):
 
 
 class PattentionSelfAttention(Attention):
+    """
+    TokenFormer: https://arxiv.org/abs/2410.23168
+    """
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -307,6 +311,161 @@ class KVShiftingAttention(Attention):
         v = self.beta1.view(1, 1, -1, 1) * v + self.beta2.view(1, 1, -1, 1) * v_shifted
 
         return k, v
+
+
+class ForgettingAttention(Attention):
+    """
+    Forgetting Transformer Attention: https://openreview.net/pdf?id=q2Lnyegkr8
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        # Add parameters for the forget gate (one for each attention head)
+        self.wf = nn.Linear(config.n_embd, self.n_head, bias=True)
+
+    def forward(self, x, q=None, mask=None):
+        B, T, C = x.size()
+        T_q = q.size(1) if q is not None else T
+
+        # Update mask if provided
+        if mask is not None:
+            self.mask = mask
+
+        # Project inputs
+        q = self._project_query(q if q is not None else x, B, T_q)
+        k, v = self._project_kv(x, B, T)
+
+        # Apply normalization and rotary embeddings if configured
+        if hasattr(self, "q_norm"):
+            q, k = self._apply_norm(q, k)
+
+        if hasattr(self, "rotary"):
+            q, k = self._apply_rotary(q, k, T_q, T)
+        elif hasattr(self, "rel_pos_emb"):
+            q, k = self._apply_relative_pos(q, k, T_q, T)
+
+        # Compute forget gates for each position and head: ft = σ(wf^T * xt + bf)
+        forget_gates = torch.sigmoid(self.wf(x))  # [B, T, n_head]
+
+        # Prepare attention inputs
+        q, k, v = self._prepare_qkv(q, k, v)
+
+        # Compute attention with forget gates
+        y = self._forgetting_attention(q, k, v, forget_gates, T)
+
+        # Project output
+        return self._project_output(y, B, T_q, C)
+
+    def _forgetting_attention(self, q, k, v, forget_gates, T):
+        # Compute attention logits
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+
+        # Apply soft cap if configured
+        if self.soft_cap > 0:
+            att = soft_cap(att, self.soft_cap)
+
+        # Arrange forget gates to match attention dimensions
+        forget_gates = forget_gates.transpose(1, 2)  # [B, n_head, T]
+
+        # Create the logit bias matrix D based on forget gates
+        # Compute log of forget gates
+        log_forget = torch.log(forget_gates + 1e-10)  # [B, n_head, T]
+
+        # Compute cumulative sums c[t] = Σ_i=1^t log(f_i)
+        # This is used to efficiently compute dij = Σ_l=j+1^i log(f_l)
+        cum_log_forget = torch.zeros_like(log_forget)
+        cum_log_forget[..., 1:] = torch.cumsum(log_forget[..., :-1], dim=-1)
+
+        # Compute D[i,j] = c[i] - c[j]
+        # This gives us the sum of log forget gates from j+1 to i
+        c_i = cum_log_forget.unsqueeze(-1)  # [B, n_head, T, 1]
+        c_j = cum_log_forget.unsqueeze(-2)  # [B, n_head, 1, T]
+        D = c_i - c_j  # [B, n_head, T, T]
+
+        # Add logit bias to attention scores (applying the forget gate effect)
+        att = att + D
+
+        # Apply causal mask (this enforces attention only to previous tokens)
+        att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+
+        # Apply softmax and dropout
+        att = F.softmax(att, dim=-1)
+        att = self.attn_dropout(att)
+
+        # Compute weighted sum of values
+        return att @ v
+
+
+#
+# WIP Implementations
+#
+
+
+class ForgettingTransformerPro(ForgettingAttention):  # OOM !
+    def __init__(self, config):
+        super().__init__(config)
+
+        # Output gate and normalization
+        self.output_gate = nn.Linear(config.n_embd, config.n_embd, bias=True)
+        self.output_norm = RMSNorm(config.n_embd)
+
+        # KV-shift components - single projection for efficiency
+        self.kv_shift_proj = nn.Linear(config.n_embd, 2 * self.n_kv_head, bias=False)
+
+        # Remove the stateful buffers - we'll handle this differently
+        self.register_buffer("zeros", torch.zeros(1), persistent=False)
+
+    def _project_kv(self, x, B, T):
+        """Override to implement KV-shift (data-dependent token shift) in a vectorized way"""
+        # Original projection for K and V
+        kv = self.kv_proj(x).view(B, T, 2, self.n_kv_head, self.head_dim)
+        k_raw, v_raw = kv.unbind(dim=2)
+
+        # If sequence length is 1, just return the raw projections
+        if T == 1:
+            return k_raw, v_raw
+
+        # Compute shift gates for both K and V at once (more efficient)
+        shift_gates = torch.sigmoid(self.kv_shift_proj(x))
+        shift_gates = shift_gates.view(B, T, 2, self.n_kv_head, 1)
+        key_gates, value_gates = shift_gates[:, :, 0], shift_gates[:, :, 1]
+
+        # Vectorized computation
+        k_shifted = torch.zeros_like(k_raw)
+        v_shifted = torch.zeros_like(v_raw)
+
+        # First position is unchanged
+        k_shifted[:, 0] = k_raw[:, 0]
+        v_shifted[:, 0] = v_raw[:, 0]
+
+        # Use a simple recurrence relation for the rest
+        # k_t = α_t * k_{t-1} + (1-α_t) * k̃_t
+        for t in range(1, T):
+            k_shifted[:, t] = (
+                key_gates[:, t] * k_shifted[:, t - 1]
+                + (1 - key_gates[:, t]) * k_raw[:, t]
+            )
+            v_shifted[:, t] = (
+                value_gates[:, t] * v_shifted[:, t - 1]
+                + (1 - value_gates[:, t]) * v_raw[:, t]
+            )
+
+        # Apply normalization to keys if needed
+        if hasattr(self, "k_norm"):
+            k_shifted = self.k_norm(k_shifted)
+
+        return k_shifted, v_shifted
+
+    def _project_output(self, y, B, T_q, C):
+        """Override to add output gate and normalization"""
+        y = y.transpose(1, 2).contiguous().view(B, T_q, C)
+
+        # Apply output normalization and gating
+        y = self.output_norm(y)
+        y = y * torch.sigmoid(self.output_gate(y))
+
+        # Final projection and dropout
+        return self.resid_dropout(self.c_proj(y))
 
 
 class DilatedAttention(Attention):  # TOOO SLOW !!
@@ -518,25 +677,6 @@ class DilatedAttention(Attention):  # TOOO SLOW !!
         return self._project_output(y, B, T_q, C)
 
 
-# Example usage:
-# config = DilatedConfig(
-#     n_embd=512,
-#     n_head=8,
-#     n_kv_head=8,
-#     block_size=1024,
-#     dilation_rate=2,
-#     segment_size=64,
-#     use_xpos=True,
-#     use_rel_pos_bias=True,
-#     qk_norm=True
-# )
-# dilated_attention = DilatedAttention(config)
-
-"""
-Differential Attention - WIP (Getting OOM)
-"""
-
-
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     """torch.repeat_interleave(x, dim=1, repeats=n_rep)"""
     bs, n_kv_heads, slen, head_dim = x.shape
@@ -553,7 +693,7 @@ def lambda_init_fn(depth):
     return 0.8 - 0.6 * math.exp(-0.3 * depth)
 
 
-class MultiheadDiffAttn(nn.Module):
+class MultiheadDiffAttn(nn.Module):  # OOM
     def __init__(
         self,
         config,
@@ -657,3 +797,54 @@ class MultiheadDiffAttn(nn.Module):
 
         attn = self.out_proj(attn)
         return attn
+
+
+if __name__ == "__main__":
+    #
+    # Testing - Forgetting Transformer Attention
+    #
+
+    # Simple configuration class for testing
+    class Config:
+        def __init__(self):
+            # Basic model configuration
+            self.n_embd = 128
+            self.n_head = 4
+            self.n_kv_head = 4
+            self.block_size = 16
+            self.dropout = 0.1
+            self.bias = False
+            self.use_qkv_bias = False
+            self.use_soft_logit_capping = False
+            self.rmsnorm_before_qk = True  # Enable for Pro version
+            self.pos_encoding = None
+
+    # Test both implementations
+    config = Config()
+
+    # Test original Forgetting Transformer
+    print("\n=== Testing Forgetting Transformer ===")
+    model = ForgettingAttention(config)
+    batch_size, seq_length = 2, 8
+    x = torch.randn(batch_size, seq_length, config.n_embd)
+
+    with torch.no_grad():
+        output = model(x)
+
+    print(f"Output shape: {output.shape}")
+
+    # Test Pro version
+    print("\n=== Testing Forgetting Transformer Pro ===")
+    pro_model = ForgettingTransformerPro(config)
+
+    with torch.no_grad():
+        pro_output = pro_model(x)
+
+    print(f"Pro output shape: {pro_output.shape}")
+
+    # Compare some statistics
+    print("\n=== Comparison ===")
+    print(f"Standard mean: {output.mean().item():.4f}, std: {output.std().item():.4f}")
+    print(
+        f"Pro mean: {pro_output.mean().item():.4f}, std: {pro_output.std().item():.4f}"
+    )
