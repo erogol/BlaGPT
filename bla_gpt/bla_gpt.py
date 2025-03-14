@@ -16,6 +16,7 @@ import torch.nn as nn
 from attentions import (
     Attention,
     DilatedAttention,
+    ForgettingAttention,
     KVShiftingAttention,
     MultiheadDiffAttn,
     MultiHeadLatentAttention,
@@ -163,6 +164,8 @@ def get_attention(config, depth=None):
         return KVShiftingAttention(config)
     elif config.attention == "dilated":
         return DilatedAttention(config)
+    elif config.attention == "forgetting":
+        return ForgettingAttention(config)
     raise ValueError(f"Unrecognized attention type {config.attention}")
 
 
