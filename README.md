@@ -33,6 +33,8 @@ Per token output bias - [link]() - loss: `3.3257` - peak memory consumption: `42
 
 DyT Norm - [link](https://arxiv.org/html/2503.10622v1) - didn't really work. Loss stuck too high
 
+Forgetting Transformer (Vanilla and Pro vers) - [link](https://openreview.net/pdf?id=q2Lnyegkr8) - vanilla loss: `3.3243`, pro loss: `OOM`
+
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
 
