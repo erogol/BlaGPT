@@ -25,7 +25,7 @@ from attentions import (
 from coqpit import Coqpit
 from mlps import MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, Primer_MLP, SwiGLU_MLP
 from modules.pattention import Pattention
-from norms import LayerNorm, RMSNorm
+from norms import DyTNorm, LayerNorm, RMSNorm
 from torch.nn import functional as F
 from utils import register_model
 
@@ -171,6 +171,8 @@ def get_norm(config):
         return RMSNorm(config.n_embd)
     elif config.norm_layer == "layernorm":
         return LayerNorm(config.n_embd, config.bias)
+    elif config.norm_layer == "dytnorm":
+        return DyTNorm(config.n_embd)
     raise ValueError(f"Unrecognized norm type {config.norm_layer}")
 
 

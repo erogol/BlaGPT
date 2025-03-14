@@ -31,6 +31,8 @@ Multi-Head Latent Attention - [link](https://arxiv.org/abs/2502.07864) - loss: `
 
 Per token output bias - [link]() - loss: `3.3257` - peak memory consumption: `42120 MiB`
 
+DyT Norm - [link](https://arxiv.org/html/2503.10622v1) - didn't really work. Loss stuck too high
+
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
 
@@ -123,8 +125,8 @@ See one of the implementations for details.
 - Start training with:
 
 ```bash
-torchrun --standalone --nproc_per_node=8 train.py --run_name pre_post_norm --model_name blagpt
-```
+'torchrun --standalone --nproc_per_node=8 train.py --run_name pre_post_norm --model_name blagpt
+'```
 
 - (Optinal) Run the learning rate finder before the training
 
