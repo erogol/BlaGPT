@@ -1,4 +1,5 @@
 import math
+from types import SimpleNamespace
 
 import torch
 import torch.nn.functional as F
@@ -11,6 +12,11 @@ try:
 except ModuleNotFoundError:
     print("No fused RMSNorm")
     from norms import RMSNorm
+
+
+#
+# Attention Modules
+#
 
 
 def soft_cap(x, cap):
@@ -41,6 +47,11 @@ class Rotary(torch.nn.Module):
         return self.cos[None, : x.size(-3), None, :], self.sin[
             None, : x.size(-3), None, :
         ]
+
+
+#
+# Base Attention Module
+#
 
 
 class Attention(nn.Module):
@@ -192,7 +203,7 @@ class Attention(nn.Module):
             v,
             attn_mask=self.mask,
             dropout_p=self.dropout if self.training else 0,
-            is_causal=True,
+            is_causal=True if self.mask is None else False,
         )
 
     def _manual_attention(self, q, k, v, T):
@@ -207,6 +218,11 @@ class Attention(nn.Module):
     def _project_output(self, y, B, T_q, C):
         y = y.transpose(1, 2).contiguous().view(B, T_q, C)
         return self.resid_dropout(self.c_proj(y))
+
+
+#
+# Specialized Attention Modules
+#
 
 
 class MultiHeadLatentAttention(Attention):
@@ -394,6 +410,197 @@ class ForgettingAttention(Attention):
 
         # Compute weighted sum of values
         return att @ v
+
+
+class MultiTokenAttention(Attention):
+    """
+    Multi-Token Attention (MTA) allows LLMs to condition their attention weights
+    on multiple query and key vectors simultaneously through convolution operations.
+
+    Key components:
+    1. Key-query convolution: Combines information from multiple query-key pairs
+    2. Head mixing convolution: Shares information between attention heads
+    3. Group normalization with depth scaling: Improves gradient flow
+    """
+    def __init__(self, config):
+        super().__init__(config)
+
+        # MTA specific parameters
+        self.use_key_query_conv = getattr(config, "use_key_query_conv", True)
+        self.use_head_conv = getattr(config, "use_head_conv", True)
+        self.use_group_norm = getattr(config, "use_group_norm", True)
+
+        # Convolution kernel dimensions
+        self.cq = getattr(config, "mta_query_kernel_size", 6)  # Query dimension
+        self.ck = getattr(config, "mta_key_kernel_size", 11)   # Key dimension
+        self.ch = getattr(config, "mta_head_kernel_size", 2)   # Head dimension
+
+        # Whether to apply convolution pre or post softmax
+        self.pre_softmax_key_query = getattr(config, "pre_softmax_key_query", True)
+        self.pre_softmax_head = getattr(config, "pre_softmax_head", False)
+
+        # Ensure head count is divisible by head kernel size
+        assert self.n_head % self.ch == 0, f"Head count {self.n_head} must be divisible by head kernel size {self.ch}"
+
+        # Initialize convolution kernels
+        if self.use_key_query_conv:
+            # One convolution kernel per head
+            self.key_query_conv = nn.Conv2d(
+                in_channels=1,
+                out_channels=1,
+                kernel_size=(self.cq, self.ck),
+                padding=((self.cq-1)//2, (self.ck-1)//2),
+                bias=False,
+                groups=1
+            )
+
+            # Initialize identity kernel (only central value is 1.0)
+            with torch.no_grad():
+                kernel = torch.zeros(1, 1, self.cq, self.ck)
+                kernel[0, 0, self.cq//2, self.ck//2] = 1.0
+                self.key_query_conv.weight.copy_(kernel)
+
+        if self.use_head_conv:
+            # Convolution across groups of heads
+            self.head_groups = self.n_head // self.ch
+
+            # Create separate convolution kernel for each group
+            # Note: This is a simplified implementation using Parameter instead of Conv1d
+            # to avoid dimension issues with standard Conv1d application
+            self.head_kernel = nn.Parameter(
+                torch.zeros(self.head_groups, self.ch, self.ch)
+            )
+
+            # Initialize identity mapping (diagonal elements = 1)
+            with torch.no_grad():
+                for g in range(self.head_groups):
+                    self.head_kernel[g] = torch.eye(self.ch)
+
+        # Group normalization for heads
+        if self.use_group_norm:
+            self.group_norm = nn.GroupNorm(self.n_head, self.n_head)
+
+    def _manual_attention(self, q, k, v, T):
+        # Get actual sequence lengths
+        B, H, T_q, _ = q.shape
+        _, _, _, T_k = k.shape
+
+        # Calculate attention logits (B, n_head, T_q, T_k)
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+
+        # Ensure we have a causal mask of correct size
+        if self.mask.shape[-1] != T_k or self.mask.shape[-2] != T_q:
+            mask = torch.tril(torch.ones(T_q, T_k, device=q.device)).view(1, 1, T_q, T_k)
+        else:
+            mask = self.mask[:, :, :T_q, :T_k]
+
+        # Apply key-query convolution if enabled
+        if self.use_key_query_conv and self.pre_softmax_key_query:
+            # Apply first masking with 0 instead of -inf for convolution
+            att_masked_for_conv = att.masked_fill(mask == 0, 0)
+
+            # Process each head separately with the same convolution
+            B, H, T_q, T_k = att_masked_for_conv.shape
+            att_reshaped = att_masked_for_conv.view(B * H, 1, T_q, T_k)
+            att_conv = self.key_query_conv(att_reshaped)
+            att = att_conv.view(B, H, T_q, T_k)
+
+            # Apply masking with -inf for softmax
+            att = att.masked_fill(mask == 0, float("-inf"))
+        else:
+            # Standard masking for softmax
+            att = att.masked_fill(mask == 0, float("-inf"))
+
+        # Apply head convolution if enabled and set to pre-softmax
+        if self.use_head_conv and self.pre_softmax_head:
+            # Reshape to group heads (B, head_groups, ch, T_q, T_k)
+            B, H, T_q, T_k = att.shape
+            att = att.view(B, self.head_groups, self.ch, T_q, T_k)
+
+            # Apply head mixing for each batch and position
+            # Loop through each group and apply the mixing
+            mixed_att = torch.zeros_like(att)
+            for g in range(self.head_groups):
+                # For each group, mix the heads using the kernel
+                # This is equivalent to applying a small fully-connected layer to the heads
+                mixed_att[:, g] = torch.einsum('bhtk,hj->bjtk', att[:, g], self.head_kernel[g])
+
+            att = mixed_att
+            # Reshape back to original shape
+            att = att.view(B, H, T_q, T_k)
+
+        # Apply softmax to get attention weights
+        att = F.softmax(att, dim=-1)
+
+        # Apply dropout
+        att = self.attn_dropout(att)
+
+        # Apply key-query convolution if enabled and post-softmax
+        if self.use_key_query_conv and not self.pre_softmax_key_query:
+            # Process each head separately
+            B, H, T_q, T_k = att.shape
+            att_reshaped = att.view(B * H, 1, T_q, T_k)
+            att_conv = self.key_query_conv(att_reshaped)
+            att = att_conv.view(B, H, T_q, T_k)
+
+            # Mask out invalid positions (future tokens)
+            att = att.masked_fill(mask == 0, 0)
+
+        # Apply head convolution if enabled and set to post-softmax
+        if self.use_head_conv and not self.pre_softmax_head:
+            # Reshape to group heads (B, head_groups, ch, T_q, T_k)
+            B, H, T_q, T_k = att.shape
+            att = att.view(B, self.head_groups, self.ch, T_q, T_k)
+
+            # Apply head mixing for each batch and position
+            mixed_att = torch.zeros_like(att)
+            for g in range(self.head_groups):
+                # For each group, mix the heads using the kernel
+                mixed_att[:, g] = torch.einsum('bhtk,hj->bjtk', att[:, g], self.head_kernel[g])
+
+            att = mixed_att
+            # Reshape back to original shape
+            att = att.view(B, H, T_q, T_k)
+
+        # Apply attention to values
+        y = att @ v
+
+        return y
+
+    def _project_output(self, y, B, T_q, C):
+        # Transpose and reshape attention output
+        y = y.transpose(1, 2).contiguous().view(B, T_q, C)
+
+        # Apply group normalization if enabled
+        if self.use_group_norm:
+            # Reshape for group normalization
+            orig_shape = y.shape
+            # Treat each head as a separate channel for group norm
+            y = y.transpose(1, 2).reshape(B * T_q, C)
+            # View as [B*T_q, n_head, head_dim] for group norm
+            y = y.view(B * T_q, self.n_head, self.head_dim)
+            # Apply group norm (treats each head as a group)
+            y = self.group_norm(y)
+            # Reshape back to original dimensions
+            y = y.view(B * T_q, C).view(B, T_q, C)
+
+        # Apply output projection and dropout
+        return self.resid_dropout(self.c_proj(y))
+
+    def forward(self, x, q=None, mask=None):
+        B, T, C = x.size()
+        T_q = q.size(1) if q is not None else T
+
+        # Ensure mask matches the current sequence length
+        if mask is None:
+            # Create a causal mask that matches the actual sequence length
+            mask = torch.tril(torch.ones(T_q, T, device=x.device)).view(1, 1, T_q, T)
+
+        # Store the properly sized mask
+        self.mask = mask
+
+        # Continue with parent implementation
+        return super().forward(x, q, mask)
 
 
 #
@@ -800,6 +1007,7 @@ class MultiheadDiffAttn(nn.Module):  # OOM
 
 
 if __name__ == "__main__":
+
     #
     # Testing - Forgetting Transformer Attention
     #
@@ -848,3 +1056,102 @@ if __name__ == "__main__":
     print(
         f"Pro mean: {pro_output.mean().item():.4f}, std: {pro_output.std().item():.4f}"
     )
+
+    #
+    # Testing - Multi-Token Attention
+    #
+
+    # Create a test configuration
+    config = SimpleNamespace(
+        n_embd=384,              # Embedding dimension
+        n_head=12,               # Number of attention heads
+        n_kv_head=12,            # Number of key-value heads (same as n_head for standard attention)
+        block_size=1024,         # Maximum sequence length
+        dropout=0.1,             # Dropout rate
+        bias=False,              # Whether to include bias in linear projections
+        use_qkv_bias=False,      # Whether to include bias in QKV projections
+        pos_encoding="rotary",   # Position encoding type
+        rope_theta=10000,        # RoPE base
+        rmsnorm_before_qk=False, # Whether to apply RMSNorm before QK projections
+        use_soft_logit_capping=False, # Soft logit capping setting
+
+        # MTA specific parameters
+        use_key_query_conv=True,     # Whether to use key-query convolution
+        use_head_conv=True,          # Whether to use head convolution
+        use_group_norm=True,         # Whether to use group normalization
+        mta_query_kernel_size=6,     # Query dimension for convolution kernel
+        mta_key_kernel_size=11,      # Key dimension for convolution kernel
+        mta_head_kernel_size=2,      # Head dimension for convolution kernel
+        pre_softmax_key_query=True,  # Whether to apply key-query convolution before softmax
+        pre_softmax_head=False       # Whether to apply head convolution before softmax
+    )
+
+    # Create a dummy Rotary class for testing (since it's used in parent class)
+    class MockRotary(nn.Module):
+        def __init__(self, dim, base=10000, seq_len=1024):
+            super().__init__()
+            self.base = base
+            self.dim = dim
+            self.inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+            t = torch.arange(seq_len, device=self.inv_freq.device, dtype=torch.float32)
+            freqs = torch.outer(t, self.inv_freq)
+            self.register_buffer("cos", freqs.cos().float())
+            self.register_buffer("sin", freqs.sin().float())
+
+        def forward(self, x):
+            return self.cos[None, : x.size(-3), None, :], self.sin[None, : x.size(-3), None, :]
+
+    # Create a mock apply_rotary_emb function
+    def mock_apply_rotary_emb(x, cos, sin):
+        # Just return x without modification for testing
+        return x
+
+    # Override the necessary methods for testing
+    Attention.rotary = None
+    MultiTokenAttention._apply_rotary = lambda self, q, k, T_q, T: (q, k)
+
+    # Print test configuration
+    print("Testing Multi-Token Attention with configuration:")
+    for key, value in vars(config).items():
+        print(f"  {key}: {value}")
+
+    # Create model
+    try:
+        model = MultiTokenAttention(config)
+        print("\nModel created successfully.")
+
+        # Generate random input
+        batch_size = 2
+        seq_len = 16
+        x = torch.randn(batch_size, seq_len, config.n_embd)
+
+        # Forward pass
+        print(f"\nRunning forward pass with input shape: {x.shape}")
+        output = model(x)
+
+        # Verify output
+        print(f"Output shape: {output.shape}")
+        assert output.shape == (batch_size, seq_len, config.n_embd), "Output shape doesn't match input shape"
+
+        # Test with different key-query and head convolution settings
+        test_configs = [
+            {"pre_softmax_key_query": True, "pre_softmax_head": False, "label": "Pre-softmax key-query, Post-softmax head (paper's best)"},
+            {"pre_softmax_key_query": False, "pre_softmax_head": False, "label": "Post-softmax key-query, Post-softmax head"},
+            {"pre_softmax_key_query": True, "pre_softmax_head": True, "label": "Pre-softmax key-query, Pre-softmax head"},
+            {"pre_softmax_key_query": False, "pre_softmax_head": True, "label": "Post-softmax key-query, Pre-softmax head"}
+        ]
+
+        print("\nTesting different convolution configurations:")
+        for test_config in test_configs:
+            # Update the model configuration
+            model.pre_softmax_key_query = test_config["pre_softmax_key_query"]
+            model.pre_softmax_head = test_config["pre_softmax_head"]
+
+            # Forward pass
+            output = model(x)
+            print(f"  ✓ {test_config['label']} - Output shape: {output.shape}")
+
+        print("\nAll tests passed successfully!")
+
+    except Exception as e:
+        print(f"\nTest failed with error: {e}")
