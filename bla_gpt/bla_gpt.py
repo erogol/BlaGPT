@@ -13,16 +13,10 @@ from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
-from attentions import (
-    Attention,
-    DilatedAttention,
-    ForgettingAttention,
-    KVShiftingAttention,
-    MultiheadDiffAttn,
-    MultiHeadLatentAttention,
-    PattentionSelfAttention,
-    soft_cap,
-)
+from attentions import (Attention, DilatedAttention, ForgettingAttention,
+                        KVShiftingAttention, MultiheadDiffAttn,
+                        MultiHeadLatentAttention, MultiTokenAttention,
+                        PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
 from mlps import MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, Primer_MLP, SwiGLU_MLP
 from modules.pattention import Pattention
@@ -50,8 +44,9 @@ class GPTConfig(Coqpit):
         False  # Whether to share parameters between prediction heads
     )
 
+    # Transformer parameters
     norm_layer: str = "rmsnorm"
-    attention: str = "regular"
+    attention: str = "multi-token"
     activation: str = "swiglu"
     use_soft_logit_capping: bool = False
     n_kv_head: int = 4  # Number of heads for the key and value (Grouped Query Attention), if n_kv_head == n_head, it is full attention
@@ -67,7 +62,18 @@ class GPTConfig(Coqpit):
         False  # use an embedding layer to add a bias to each token prediction
     )
 
-    # dilated attention parameters
+    # Multi-token attention parameters
+    use_key_query_conv=True,
+    query_kernel_size=6,
+    key_kernel_size=11,
+    pre_softmax_key_query=True,
+    use_head_conv=True,
+    head_kernel_size=2,
+    pre_softmax_head=False,
+    use_group_norm=True,
+    apply_key_query_every_n_layers=4
+
+    # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
     dilation_rates: list[int] = field(default_factory=lambda: [1, 2, 4, 6, 12])
 
@@ -166,6 +172,8 @@ def get_attention(config, depth=None):
         return DilatedAttention(config)
     elif config.attention == "forgetting":
         return ForgettingAttention(config)
+    elif config.attention == "multi-token":
+        return MultiTokenAttention(config)
     raise ValueError(f"Unrecognized attention type {config.attention}")
 
 
@@ -584,13 +592,3 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
-
-
-@register_model
-def register_blagpt():
-    return GPTConfig, GPT
-
-
-@register_model
-def register_tokenformer():
-    return TokenformerConfig, GPT
