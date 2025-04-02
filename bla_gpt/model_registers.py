@@ -1,0 +1,49 @@
+from utils import register_model
+
+
+@register_model
+def register_blagpt():
+    from bla_gpt import GPT, GPTConfig
+    return GPTConfig, GPT
+
+
+@register_model
+def register_tokenformer():
+    from bla_gpt import GPT, TokenformerConfig
+    return TokenformerConfig, GPT
+
+
+@register_model
+def register_ftp():
+    from ftp import FTPConfig, FTPModel
+    return FTPConfig, FTPModel
+
+
+@register_model
+def register_hourglass():
+    from hourglass_transformer import HourglassConfig, HourglassTransformer
+    return HourglassConfig, HourglassTransformer
+
+
+@register_model
+def register_hymba():
+    from hymba import HymbaConfig, HymbaForBlaGPT
+    return HymbaConfig, HymbaForBlaGPT
+
+
+@register_model
+def register_rene():
+    from rene import ReneConfig, ReneLMHeadModel
+    return ReneConfig, ReneLMHeadModel
+
+
+@register_model
+def register_rwkv7():
+    from rwkv7.model import RWKV7Config, RWKV7Model
+    return RWKV7Config, RWKV7Model
+
+
+@register_model
+def register_zamba():
+    from bla_gpt.zamba2.config import MambaConfig, MambaModel
+    return MambaConfig, MambaModel

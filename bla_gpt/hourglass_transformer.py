@@ -10,7 +10,6 @@ from attentions import Attention
 from coqpit import Coqpit
 from mlps import SwiGLU_MLP
 from norms import RMSNorm
-from utils import register_model
 
 
 @dataclass
@@ -311,11 +310,6 @@ class HourglassTransformer(nn.Module):
                 logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=-1
             )
         return logits, loss
-
-
-@register_model
-def register_hourglass():
-    return HourglassConfig, HourglassTransformer
 
 
 if __name__ == "__main__":

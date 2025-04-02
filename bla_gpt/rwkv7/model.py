@@ -28,7 +28,6 @@ import torch.nn.functional as F
 from coqpit import Coqpit
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel as DDP
-from utils import register_model
 
 # -----------------------------------------------------------------------------
 # The main GPT-2 model
@@ -551,8 +550,3 @@ class RWKV7Model(nn.Module):
             logits = None
 
         return logits, loss
-
-
-@register_model
-def register_rwkv7():
-    return RWKV7Config, RWKV7Model

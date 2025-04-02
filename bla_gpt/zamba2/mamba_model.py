@@ -6,9 +6,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 from torch import Tensor
-from utils import register_model
 from zamba2.config import MambaConfig
-
 # from hf_utils import *
 from zamba2.mamba_block import MambaDecoder
 
@@ -166,8 +164,3 @@ class MambaModel(nn.Module):
         config_path = os.path.join(save_directory, "config.json")
         with open(config_path, "w") as f:
             json.dump(self.config.__dict__, f)
-
-
-@register_model
-def register_zamba():
-    return MambaConfig, MambaModel

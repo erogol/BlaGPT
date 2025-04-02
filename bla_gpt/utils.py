@@ -103,4 +103,8 @@ def find_registered_model_fns():
 
 def get_model(model_name):
     registered_fns = find_registered_model_fns()
-    return registered_fns[model_name]()  # model, config
+
+    try:
+        return registered_fns[model_name]()  # model, config
+    except KeyError:
+        raise ValueError(f"Model {model_name} not found in registered models. Registered models are: {list(registered_fns.keys())}")

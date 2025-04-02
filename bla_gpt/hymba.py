@@ -8,7 +8,8 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from flash_attn import flash_attn_func, flash_attn_varlen_func
-from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
+from flash_attn.bert_padding import (index_first_axis, pad_input,  # noqa
+                                     unpad_input)
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from transformers.activations import ACT2FN
@@ -16,22 +17,15 @@ from transformers.cache_utils import Cache, DynamicCache
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_attn_mask_utils import (
     _prepare_4d_causal_attention_mask,
-    _prepare_4d_causal_attention_mask_for_sdpa,
-)
-from transformers.modeling_outputs import (
-    MoeCausalLMOutputWithPast,
-    MoeModelOutputWithPast,
-)
+    _prepare_4d_causal_attention_mask_for_sdpa)
+from transformers.modeling_outputs import (MoeCausalLMOutputWithPast,
+                                           MoeModelOutputWithPast)
 from transformers.modeling_utils import PreTrainedModel
 from transformers.pytorch_utils import is_torch_greater_or_equal_than_1_13
-from transformers.utils import (
-    add_start_docstrings_to_model_forward,
-    is_flash_attn_greater_or_equal_2_10,
-    logging,
-    replace_return_docstrings,
-)
+from transformers.utils import (add_start_docstrings_to_model_forward,
+                                is_flash_attn_greater_or_equal_2_10, logging,
+                                replace_return_docstrings)
 from transformers.utils.import_utils import is_torch_fx_available
-from utils import register_model
 
 _flash_supports_window_size = "window_size" in list(
     inspect.signature(flash_attn_func).parameters
@@ -47,7 +41,8 @@ if is_torch_fx_available():
 
 
 from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
-from mamba_ssm.ops.selective_scan_interface import mamba_inner_fn, selective_scan_fn
+from mamba_ssm.ops.selective_scan_interface import (mamba_inner_fn,
+                                                    selective_scan_fn)
 from mamba_ssm.ops.triton.selective_state_update import selective_state_update
 
 is_fast_path_available = all(
@@ -1570,12 +1565,10 @@ class HymbaFlexAttention(HymbaFlashAttention2):
 
         from functools import partial
 
-        from torch.nn.attention.flex_attention import (
-            and_masks,
-            create_block_mask,
-            flex_attention,
-            or_masks,
-        )
+        from torch.nn.attention.flex_attention import (and_masks,
+                                                       create_block_mask,
+                                                       flex_attention,
+                                                       or_masks)
 
         self.create_block_mask = create_block_mask
 
@@ -3397,11 +3390,6 @@ class HymbaForBlaGPT(HymbaForCausalLM):
     def forward(self, idx, targets):
         output = super().forward(input_ids=idx, labels=targets)
         return output["logits"], output["loss"]
-
-
-@register_model
-def register_hymba():
-    return HymbaConfig, HymbaForBlaGPT
 
 
 if __name__ == "__main__":
