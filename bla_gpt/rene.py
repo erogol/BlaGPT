@@ -20,7 +20,6 @@ except ImportError:
 from typing import Dict, List, Optional
 
 from transformers.configuration_utils import PretrainedConfig
-from utils import register_model
 
 
 class ReneConfig(PretrainedConfig):
@@ -440,7 +439,8 @@ class MixerModel(nn.Module):
         self.residual_in_fp32 = residual_in_fp32
 
         if rms_norm:
-            from mamba_ssm.ops.triton.layer_norm import RMSNorm as norm_cls_base
+            from mamba_ssm.ops.triton.layer_norm import \
+                RMSNorm as norm_cls_base
         else:
             norm_cls_base = nn.LayerNorm
         norm_cls = partial(norm_cls_base, eps=norm_epsilon, **factory_kwargs)
@@ -619,8 +619,3 @@ class ReneLMHeadModel(PreTrainedModel, MambaGenerationMixin):
         Refer to that method for argument names and defaults.
         """
         return MambaGenerationMixin.generate(self, *args, **kwargs)
-
-
-@register_model
-def register_rene():
-    return ReneConfig, ReneLMHeadModel

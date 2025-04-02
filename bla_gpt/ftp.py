@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from attentions import Rotary, apply_rotary_emb
 from coqpit import Coqpit
 from norms import RMSNorm
-from utils import detach_loss, register_model
+from utils import detach_loss
 
 
 @dataclass
@@ -471,20 +471,13 @@ class FTPModel(nn.Module):
             return self.output_proj(y)
 
 
-@register_model
-def register_ftp():
-    return FTPConfig, FTPModel
-
 
 if __name__ == "__main__":
     import gc
 
     import numpy as np
-    from torch.cuda import (
-        max_memory_allocated,
-        memory_allocated,
-        reset_peak_memory_stats,
-    )
+    from torch.cuda import (max_memory_allocated, memory_allocated,
+                            reset_peak_memory_stats)
 
     def get_size(bytes):
         """Convert bytes to human readable format"""
