@@ -483,33 +483,37 @@ class MultiTokenAttention(Attention):
     def _manual_attention(self, q, k, v, T):
         # Get actual sequence lengths
         B, H, T_q, _ = q.shape
-        _, _, _, T_k = k.shape
+        _, _, T_k, _ = k.shape
 
         # Calculate attention logits (B, n_head, T_q, T_k)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
 
-        # Ensure we have a causal mask of correct size
-        if self.mask.shape[-1] != T_k or self.mask.shape[-2] != T_q:
-            mask = torch.tril(torch.ones(T_q, T_k, device=q.device)).view(1, 1, T_q, T_k)
-        else:
-            mask = self.mask[:, :, :T_q, :T_k]
+        # Create fresh causal mask every time, expanded for batch and head dimensions
+        causal_mask = torch.tril(torch.ones(T_q, T_k, device=q.device)).view(1, 1, T_q, T_k)
 
         # Apply key-query convolution if enabled
         if self.use_key_query_conv and self.pre_softmax_key_query:
-            # Apply first masking with 0 instead of -inf for convolution
-            att_masked_for_conv = att.masked_fill(mask == 0, 0)
+            # Causal masking
+            att_masked_for_conv = att * causal_mask
 
             # Process each head separately with the same convolution
             B, H, T_q, T_k = att_masked_for_conv.shape
             att_reshaped = att_masked_for_conv.view(B * H, 1, T_q, T_k)
+
+            # Apply convolution
             att_conv = self.key_query_conv(att_reshaped)
+
+            # Reshape back
             att = att_conv.view(B, H, T_q, T_k)
 
-            # Apply masking with -inf for softmax
-            att = att.masked_fill(mask == 0, float("-inf"))
+            # Re-apply causal masking to ensure convolution didn't leak information
+            att = att * causal_mask
+
+            # Now apply softmax masking with -inf
+            att = att.masked_fill((1 - causal_mask).bool(), float("-inf"))
         else:
             # Standard masking for softmax
-            att = att.masked_fill(mask == 0, float("-inf"))
+            att = att.masked_fill((1 - causal_mask).bool(), float("-inf"))
 
         # Apply head convolution if enabled and set to pre-softmax
         if self.use_head_conv and self.pre_softmax_head:
@@ -518,16 +522,17 @@ class MultiTokenAttention(Attention):
             att = att.view(B, self.head_groups, self.ch, T_q, T_k)
 
             # Apply head mixing for each batch and position
-            # Loop through each group and apply the mixing
             mixed_att = torch.zeros_like(att)
             for g in range(self.head_groups):
                 # For each group, mix the heads using the kernel
-                # This is equivalent to applying a small fully-connected layer to the heads
                 mixed_att[:, g] = torch.einsum('bhtk,hj->bjtk', att[:, g], self.head_kernel[g])
 
             att = mixed_att
             # Reshape back to original shape
             att = att.view(B, H, T_q, T_k)
+
+            # Re-apply causal masking to ensure no information leakage
+            att = att.masked_fill((1 - causal_mask).bool(), float("-inf"))
 
         # Apply softmax to get attention weights
         att = F.softmax(att, dim=-1)
@@ -537,14 +542,25 @@ class MultiTokenAttention(Attention):
 
         # Apply key-query convolution if enabled and post-softmax
         if self.use_key_query_conv and not self.pre_softmax_key_query:
+            # Apply strict causal masking before convolution
+            att_masked_for_conv = att * causal_mask
+
             # Process each head separately
-            B, H, T_q, T_k = att.shape
-            att_reshaped = att.view(B * H, 1, T_q, T_k)
+            B, H, T_q, T_k = att_masked_for_conv.shape
+            att_reshaped = att_masked_for_conv.view(B * H, 1, T_q, T_k)
+
+            # Apply convolution
             att_conv = self.key_query_conv(att_reshaped)
+
+            # Reshape back
             att = att_conv.view(B, H, T_q, T_k)
 
-            # Mask out invalid positions (future tokens)
-            att = att.masked_fill(mask == 0, 0)
+            # Re-apply causal masking
+            att = att * causal_mask
+
+            # Renormalize attention weights to sum to 1 after masking
+            att_sum = att.sum(dim=-1, keepdim=True)
+            att = att / (att_sum + 1e-8)  # Add small epsilon to avoid division by zero
 
         # Apply head convolution if enabled and set to post-softmax
         if self.use_head_conv and not self.pre_softmax_head:
@@ -562,10 +578,27 @@ class MultiTokenAttention(Attention):
             # Reshape back to original shape
             att = att.view(B, H, T_q, T_k)
 
+            # Re-apply causal masking
+            att = att * causal_mask
+
+            # Renormalize attention weights after masking
+            att_sum = att.sum(dim=-1, keepdim=True)
+            att = att / (att_sum + 1e-8)  # Add small epsilon to avoid division by zero
+
         # Apply attention to values
         y = att @ v
 
         return y
+
+    def _flash_attention(self, q, k, v):
+        return torch.nn.functional.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=None,  # Flash attention handles causal masking internally with is_causal
+            dropout_p=self.dropout if self.training else 0,
+            is_causal=True,  # Always use causal masking
+        )
 
     def _project_output(self, y, B, T_q, C):
         # Transpose and reshape attention output
@@ -574,15 +607,11 @@ class MultiTokenAttention(Attention):
         # Apply group normalization if enabled
         if self.use_group_norm:
             # Reshape for group normalization
-            orig_shape = y.shape
-            # Treat each head as a separate channel for group norm
-            y = y.transpose(1, 2).reshape(B * T_q, C)
-            # View as [B*T_q, n_head, head_dim] for group norm
             y = y.view(B * T_q, self.n_head, self.head_dim)
             # Apply group norm (treats each head as a group)
             y = self.group_norm(y)
             # Reshape back to original dimensions
-            y = y.view(B * T_q, C).view(B, T_q, C)
+            y = y.view(B, T_q, C)
 
         # Apply output projection and dropout
         return self.resid_dropout(self.c_proj(y))
@@ -591,17 +620,11 @@ class MultiTokenAttention(Attention):
         B, T, C = x.size()
         T_q = q.size(1) if q is not None else T
 
-        # Ensure mask matches the current sequence length
-        if mask is None:
-            # Create a causal mask that matches the actual sequence length
-            mask = torch.tril(torch.ones(T_q, T, device=x.device)).view(1, 1, T_q, T)
+        # Always create a fresh causal mask for the correct sequence length
+        causal_mask = torch.tril(torch.ones(T_q, T, device=x.device)).view(1, 1, T_q, T)
 
-        # Store the properly sized mask
-        self.mask = mask
-
-        # Continue with parent implementation
-        return super().forward(x, q, mask)
-
+        # Use the fresh mask for this forward pass
+        return super().forward(x, q, causal_mask)
 
 #
 # WIP Implementations
