@@ -129,8 +129,8 @@ See one of the implementations for details.
 - Start training with:
 
 ```bash
-'torchrun --standalone --nproc_per_node=8 train.py --run_name pre_post_norm --model_name blagpt
-'```
+torchrun --standalone --nproc_per_node=8 train.py --run_name pre_post_norm --model_name blagpt
+```
 
 - (Optinal) Run the learning rate finder before the training
 
