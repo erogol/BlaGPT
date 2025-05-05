@@ -20,6 +20,7 @@ from attentions import (Attention, DilatedAttention, ForgettingAttention,
 from coqpit import Coqpit
 from mlps import MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, Primer_MLP, SwiGLU_MLP
 from modules.pattention import Pattention
+from modules.canon_layer import CanonLayer
 from norms import DyTNorm, LayerNorm, RMSNorm
 from torch.nn import functional as F
 from utils import register_model
@@ -45,9 +46,9 @@ class GPTConfig(Coqpit):
     )
 
     # Transformer parameters
-    norm_layer: str = "rmsnorm"
-    attention: str = "multi-token"
-    activation: str = "swiglu"
+    norm_layer: str = "rmsnorm" # type of normalization layer to use
+    attention: str = "regular" # attention type in `get_attention()`
+    activation: str = "swiglu" # activation type in `get_mlp()`
     use_soft_logit_capping: bool = False
     n_kv_head: int = 4  # Number of heads for the key and value (Grouped Query Attention), if n_kv_head == n_head, it is full attention
     tie_embed_weights: bool = True
@@ -61,6 +62,8 @@ class GPTConfig(Coqpit):
     use_per_token_output_bias: bool = (
         False  # use an embedding layer to add a bias to each token prediction
     )
+    use_softpick: bool = True  # use softpick instead of softmax in attention block - https://arxiv.org/html/2504.20966v1
+                                # when True model defaults to vanilla attention instead of flash attention
 
     # Multi-token attention parameters
     use_key_query_conv=True,
@@ -72,6 +75,9 @@ class GPTConfig(Coqpit):
     pre_softmax_head=False,
     use_group_norm=True,
     apply_key_query_every_n_layers=4
+
+    # Canon layer parameters
+    use_canon_layers: bool = False # Whether to use Canon layers before MLP and Attention blocks (Configs A and C in the paper)
 
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
@@ -220,6 +226,9 @@ class MultiTokenPredictionHead(nn.Module):
 
 
 class Block(nn.Module):
+    """
+    A single Transformer block with attention and MLP layers.
+    """
     def __init__(self, config, depth):
         super().__init__()
         self.ln_1 = get_norm(config)
@@ -258,6 +267,37 @@ class Block(nn.Module):
         return x
 
 
+class CanonBlock(Block):
+    """
+    A Transformer block that applies a CanonLayer before both attention and MLP operations.
+    Inherits from the standard Block class and adds causal 1D convolution layers.
+
+    """
+    # NOTE: For some reason, there is future leakage in the CanonBlock, getting very low training loss very fast.
+
+    def __init__(self, config, depth, canon_kernel_size=4):
+        super().__init__(config, depth)
+
+        # Add CanonLayers before attention and MLP
+        self.canon_attn = CanonLayer(hidden_dim=config.n_embd, kernel_size=canon_kernel_size)
+        self.canon_mlp = CanonLayer(hidden_dim=config.n_embd, kernel_size=canon_kernel_size)
+
+    def forward(self, x):
+        # Apply CanonLayer before attention branch
+        x = self.canon_attn(x)
+
+        # Attention branch
+        x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1)
+
+        # Apply CanonLayer before MLP branch
+        x = self.canon_mlp(x)
+
+        # MLP branch
+        x = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, self.res_w2)
+
+        return x
+
+
 class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -267,6 +307,9 @@ class GPT(nn.Module):
         self.soft_cap = 30.0 if config.use_soft_logit_capping else 0.0
         self.zero_init_proj_layers = config.zero_init_proj_layers
 
+
+        _Block = Block if not config.use_canon_layers else CanonBlock
+
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.vocab_size, config.n_embd),
@@ -274,7 +317,7 @@ class GPT(nn.Module):
                 if not config.pos_encoding not in [None, "none"]
                 else None,
                 drop=nn.Dropout(config.dropout),
-                h=nn.ModuleList([Block(config, d) for d in range(config.n_layer)]),
+                h=nn.ModuleList([_Block(config, d) for d in range(config.n_layer)]),
                 ln_f=get_norm(config),
             )
         )
