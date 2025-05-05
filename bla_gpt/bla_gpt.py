@@ -62,7 +62,7 @@ class GPTConfig(Coqpit):
     use_per_token_output_bias: bool = (
         False  # use an embedding layer to add a bias to each token prediction
     )
-    use_softpick: bool = True  # use softpick instead of softmax in attention block - https://arxiv.org/html/2504.20966v1
+    use_softpick: bool = False  # use softpick instead of softmax in attention block - https://arxiv.org/html/2504.20966v1
                                 # when True model defaults to vanilla attention instead of flash attention
 
     # Multi-token attention parameters
