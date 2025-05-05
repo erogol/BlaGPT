@@ -37,6 +37,12 @@ Forgetting Transformer (Vanilla and Pro vers) - [link](https://openreview.net/pd
 
 Multi-Token Attention - [link](https://arxiv.org/pdf/2504.00927) - loss: `3.3357` - peak memory: `42136 MiB`
 
+Differential Attention - [link](https://arxiv.org/abs/2410.05258) - loss: `3.3352` - peak memory: `41521 MiB`
+
+Softpick - [link](https://arxiv.org/abs/2504.20966) - loss: `3.3446` - peak memory: `59417 MiB`
+
+Canon Layer - [link](https://physics.allen-zhu.com/part-4-architecture-design/part-4-1) - Currently buggy. Not sure but casuality might be broken.
+
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
 
@@ -152,3 +158,5 @@ The initial code is based on
 Nano GPT - [link](https://github.com/karpathy/nanoGPT)
 
 Modded NanoGPT - [link](https://github.com/KellerJordan/modded-nanogpt)
+
+Thanks to @xumingyu2021 for memory friendly implementation of the Differential Attention
