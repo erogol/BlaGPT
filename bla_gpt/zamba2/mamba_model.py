@@ -101,7 +101,6 @@ class MambaModel(nn.Module):
 
         logits = hidden_states @ self.embedding.weight.T
 
-        breakpoint()
 
         if targets is not None:
             logits = logits.float()
