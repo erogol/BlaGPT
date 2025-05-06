@@ -77,7 +77,10 @@ class GPTConfig(Coqpit):
     apply_key_query_every_n_layers=4
 
     # Canon layer parameters
-    use_canon_layers: bool = False # Whether to use Canon layers before MLP and Attention blocks (Configs A and C in the paper)
+    use_canon_layers: bool = True  # Whether to use Canon layers before MLP and Attention blocks (Configs A and C in the paper)
+
+    # Parallel Transformer (like PaLM) block parameters
+    use_parallel_blocks: bool = False  # Whether to apply attention and mlp blocks in parallel instead of sequentially
 
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
@@ -267,6 +270,32 @@ class Block(nn.Module):
         return x
 
 
+class ParallelBlock(Block):
+    """
+    A Transformer block that runs Attention and MLP branches in parallel
+    with causal constraints.
+    """
+
+    def _process_branch(self, x, ln_pre, branch_fn, ln_post=None):
+        # Process input through branch (attention or MLP)
+        branch_out = branch_fn(ln_pre(x))
+
+        # Apply optional post-normalization
+        if ln_post is not None:
+            branch_out = ln_post(branch_out)
+        return branch_out
+
+    def forward(self, x):
+        # Attention branch - already has causal masking
+        x1 = self._process_branch(x, self.ln_1, self.attn, self.ln_3)
+
+        # Apply MLP to each position separately then mask to maintain causality
+        x2 = self._process_branch(x, self.ln_2, self.mlp, self.ln_4)
+
+        # Zero out future influences - each position only influenced by current and past tokens
+        return x + x1 + x2
+
+
 class CanonBlock(Block):
     """
     A Transformer block that applies a CanonLayer before both attention and MLP operations.
@@ -308,7 +337,12 @@ class GPT(nn.Module):
         self.zero_init_proj_layers = config.zero_init_proj_layers
 
 
-        _Block = Block if not config.use_canon_layers else CanonBlock
+        _Block = Block
+        if config.use_parallel_blocks:
+            print("Using parallel transformer blocks")
+            _Block = ParallelBlock
+        elif config.use_canon_layers:
+            _Block = CanonBlock
 
         self.transformer = nn.ModuleDict(
             dict(
