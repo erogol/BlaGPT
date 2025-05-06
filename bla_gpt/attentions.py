@@ -107,12 +107,7 @@ class Attention(nn.Module):
         self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
 
         # Causal mask
-        self.register_buffer(
-            "mask",
-            torch.tril(torch.ones(config.block_size, config.block_size)).view(
-                1, 1, config.block_size, config.block_size
-            ),
-        )
+        self.mask = None
 
         self.set_layers(config)
 
@@ -136,6 +131,8 @@ class Attention(nn.Module):
         # Update mask if provided
         if mask is not None:
             self.mask = mask
+        # else:
+        #     self.mask = torch.triu(torch.ones(T, T, dtype=torch.bool), diagonal=1)
 
         # Project inputs
         q = self._project_query(q if q is not None else x, B, T_q)
