@@ -41,7 +41,9 @@ Differential Attention - [link](https://arxiv.org/abs/2410.05258) - loss: `3.335
 
 Softpick - [link](https://arxiv.org/abs/2504.20966) - loss: `3.3446` - peak memory: `59417 MiB`
 
-Canon Layer - [link](https://physics.allen-zhu.com/part-4-architecture-design/part-4-1) - Currently buggy. Not sure but casuality might be broken.
+Canon Layer - [link](https://physics.allen-zhu.com/part-4-architecture-design/part-4-1) - loss: `3.3217` - peak memory: `43199 MiB`
+
+Parallel Transformer Block - [link](https://arxiv.org/abs/2204.02311) - loss: `3.3473` - peak memory: `40302 MiB`
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
