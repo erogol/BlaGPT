@@ -79,6 +79,7 @@ class Attention(nn.Module):
         self.head_dim = config.n_embd // config.n_head
         self.soft_cap = 50.0 if config.use_soft_logit_capping else 0.0
         self.use_softpick = config.use_softpick
+        self.causal = True
 
         # RMSNorm before q and k projections
         if config.rmsnorm_before_qk:
@@ -216,10 +217,13 @@ class Attention(nn.Module):
             v,
             attn_mask=self.mask,
             dropout_p=self.dropout if self.training else 0,
-            is_causal=True if self.mask is None else False,
+            is_causal=self.causal if self.mask is None else False,
         )
 
     def _manual_attention(self, q, k, v, T):
+        if self.causal and self.mask is None:
+            self.mask = torch.triu(torch.ones(T, T, dtype=torch.bool, device=q.device), diagonal=1)
+
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         if self.soft_cap > 0:
             att = soft_cap(att, self.soft_cap)
