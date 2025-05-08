@@ -69,6 +69,27 @@ def get_optimizer(
     elif optimizer_name.lower() == "mars":
         module = importlib.import_module("optimizers.mars")
         optimizer = getattr(module, "MARS")
+    elif optimizer_name.lower() == "muon":
+        module = importlib.import_module("optimizers.muon")
+        optimizer = getattr(module, "Muon")
+        muon_params = [
+            p
+            for name, p in model.named_parameters()
+            if p.ndim >= 2 and "embed_tokens" not in name and "lm_head" not in name
+        ]
+        adamw_params = [
+            p
+            for name, p in model.named_parameters()
+            if not (
+                p.ndim >= 2 and "embed_tokens" not in name and "lm_head" not in name
+            )
+        ]
+        return optimizer(
+            lr=lr,
+            muon_params=muon_params,
+            adamw_params=adamw_params,
+            **optimizer_params
+        )
     else:
         optimizer = getattr(torch.optim, optimizer_name)
     return optimizer(parameters, lr=lr, **optimizer_params)
