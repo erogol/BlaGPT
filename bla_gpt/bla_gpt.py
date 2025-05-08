@@ -111,7 +111,7 @@ class GPTConfig(Coqpit):
 
 
 @dataclass
-class TokenformerConfig(Coqpit):
+class TokenformerConfig(GPTConfig):
     """Default values for the best performed model so far"""
 
     block_size: int = 1024
@@ -353,9 +353,9 @@ class GPT(nn.Module):
 
 
         _Block = Block
-        if config.use_parallel_blocks:
+        if "use_parallel_blocks" in config and config.use_parallel_blocks:
             _Block = ParallelBlock
-        elif config.use_canon_layers:
+        elif "use_canon_layer" in config and config.use_canon_layers:
             _Block = CanonBlock
 
         self.transformer = nn.ModuleDict(
