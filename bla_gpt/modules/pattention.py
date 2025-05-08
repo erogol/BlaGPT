@@ -23,10 +23,9 @@ class Pattention(nn.Module):
             data=torch.rand((self.param_token_num, self.param_value_dim))
         )
 
-        nn.init.normal_(
-            self.key_param_tokens, std=0.02
-        )  # TODO: check paper for initialization
-        nn.init.normal_(self.value_param_tokens, std=0.02)
+        gain = 3.0 / math.sqrt(self.param_key_dim)
+        nn.init.normal_(self.key_param_tokens, std=gain)
+        nn.init.normal_(self.value_param_tokens, std=gain)
 
     def nonlinear_norm_func(self, inputs, normalize_type, dim=-1):
         if normalize_type == "softmax":
@@ -74,20 +73,28 @@ class Pattention(nn.Module):
 
         L, S = query.size(-2), key.size(-2)
         scale_factor = 1 if scale is None else scale
-        # just for gelu nonlinear, set torch.zeros for softmax
-        attn_bias = torch.ones(L, S, dtype=query.dtype, device=query.device)
+
+        if self.norm_activation_type == "softmax":
+            attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+        else:
+            attn_bias = torch.ones(L, S, dtype=query.dtype, device=query.device)
 
         if attn_mask is not None:
             if attn_mask.dtype == torch.bool:
-                # just for gelu nonlinear, set -inf for softmax
-                attn_bias.masked_fill_(attn_mask.logical_not(), 0)
+                if self.norm_activation_type == "softmax":
+                    attn_bias.masked_fill_(attn_mask, float("-inf"))
+                else:
+                    attn_bias.masked_fill_(attn_mask.logical_not(), 0)
             else:
                 raise NotImplementedError
 
         attn_weight = query @ key.transpose(-2, -1) * scale_factor
-        # just for gelu nonlinear, set attn_weight += attn_bias for softmax
-        attn_weight *= attn_bias
-        # modified softmax
+
+        if self.norm_activation_type == "softmax":
+            attn_weight += attn_bias
+        else:
+            attn_weight *= attn_bias
+
         attn_weight = self.nonlinear_norm_func(
             attn_weight, self.norm_activation_type, dim=-1
         )

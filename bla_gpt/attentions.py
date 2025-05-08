@@ -78,7 +78,7 @@ class Attention(nn.Module):
         self.n_embd = config.n_embd
         self.head_dim = config.n_embd // config.n_head
         self.soft_cap = 50.0 if config.use_soft_logit_capping else 0.0
-        self.use_softpick = config.use_softpick
+        self.use_softpick =  config.use_softpick if "use_softpick" in config else False
         self.causal = True
 
         # RMSNorm before q and k projections
@@ -985,7 +985,7 @@ class MultiheadDiffAttn(nn.Module):  # OOM
             torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0, std=0.1)
         )
 
-        self.subln = RMSNorm(2 * self.head_dim)
+        self.subln = RMSNorm(2 * self.head_dim, eps=1e-5)
         self.rotary = Rotary(self.head_dim)
 
         assert flash_attn_func, "FlashAttention is not available. Please install it to use this module."
