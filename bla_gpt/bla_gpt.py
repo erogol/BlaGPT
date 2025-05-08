@@ -77,7 +77,7 @@ class GPTConfig(Coqpit):
     apply_key_query_every_n_layers=4
 
     # Canon layer parameters
-    use_canon_layers: bool = True  # Whether to use Canon layers before MLP and Attention blocks (Configs A and C in the paper)
+    use_canon_layers: bool = False  # Whether to use Canon layers before MLP and Attention blocks (Configs A and C in the paper)
 
     # Parallel Transformer (like PaLM) block parameters
     use_parallel_blocks: bool = False  # Whether to apply attention and mlp blocks in parallel instead of sequentially
@@ -99,7 +99,7 @@ class GPTConfig(Coqpit):
 
     # optimizer - overriding Hyperparameters
     optimizer_name: str = (
-        "Adam"  # check get_optimizer() in bla_gpt/optimizers/__init__.py
+        "Muon"  # check get_optimizer() in bla_gpt/optimizers/__init__.py
     )
     optimizer_args: dict = field(
         default_factory=lambda: {
@@ -311,18 +311,33 @@ class CanonBlock(Block):
         self.canon_attn = CanonLayer(hidden_dim=config.n_embd, kernel_size=canon_kernel_size)
         self.canon_mlp = CanonLayer(hidden_dim=config.n_embd, kernel_size=canon_kernel_size)
 
+    def _process_branch(self, x, ln_pre, branch_fn, canon_fn, ln_post=None, res_weight=None):
+        # Pre-norm
+        branch_out = ln_pre(x)
+
+        # Apply Canon layer
+        branch_out = branch_out + canon_fn(branch_out)
+
+        # Apply branch function (attention or MLP)
+        branch_out = branch_fn(branch_out)
+
+        # Apply optional post-normalization
+        if ln_post is not None:
+            branch_out = ln_post(branch_out)
+
+        # Apply optional residual weight
+        if res_weight is not None:
+            return res_weight * x + branch_out
+
+        # Residual connection
+        return x + branch_out
+
     def forward(self, x):
-        # Apply CanonLayer before attention branch
-        x = self.canon_attn(x)
-
         # Attention branch
-        x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1)
-
-        # Apply CanonLayer before MLP branch
-        x = self.canon_mlp(x)
+        x = self._process_branch(x, self.ln_1, self.attn, self.canon_attn, self.ln_3, self.res_w1)
 
         # MLP branch
-        x = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, self.res_w2)
+        x = self._process_branch(x, self.ln_2, self.mlp, self.canon_mlp, self.ln_4, self.res_w2)
 
         return x
 
@@ -339,7 +354,6 @@ class GPT(nn.Module):
 
         _Block = Block
         if config.use_parallel_blocks:
-            print("Using parallel transformer blocks")
             _Block = ParallelBlock
         elif config.use_canon_layers:
             _Block = CanonBlock
