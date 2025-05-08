@@ -83,48 +83,14 @@ Adam-Mini - [link]() - loss is higher than Adam and AdamW and also slower ??, sa
 
 MARS - [link](https://github.com/AGI-Arena/MARS) - loss: `3.3459`, peak VRAM: 40953 MiB, step_time: `628ms`
 
-## Best Model So Far
-BlaGPT with the following configurations:
+Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak VRAM: `40332MB`, step_time: `620.24ms`
 
-```json
-{
-    "params": {
-      "norm_layer": "rmsnorm",
-      "attention": "GQA",
-      "activation": "swiglu",
-      "tie_embed_weights": true,
-      "zero_init_proj_layers": true,
-      "use_rotary_emb": true,
-      "rmsnorm_before_qk": true
-    },
-    "config": {
-      "block_size": 1024,
-      "vocab_size": 50304,
-      "n_layer": 12,
-      "n_head": 12,
-      "n_embd": 768,
-      "dropout": 0.0,
-      "bias": true,
-      "norm_layer": "rmsnorm",
-      "attention": "GQA",
-      "activation": "swiglu",
-      "use_soft_logit_capping": false,
-      "n_kv_head": 4,
-      "tie_embed_weights": true,
-      "zero_init_proj_layers": true,
-      "rmsnorm_before_qk": true,
-      "use_rotary_emb": true
-    },
-    "val_loss": 3.2993,
-    "memory_usage": 49403,
-  },
-```
 
 ## Adding a New Model
 
 - Implement the model
 - Return the loss in the forward function
-- Register the model
+- Add model to `model_registry.py`
 - And start training
 
 See one of the implementations for details.
@@ -140,7 +106,7 @@ See one of the implementations for details.
 torchrun --standalone --nproc_per_node=8 train.py --run_name pre_post_norm --model_name blagpt
 ```
 
-- (Optinal) Run the learning rate finder before the training
+- (Optional) Run the learning rate finder before the training
 
 ```bash
 torchrun --standalone --nproc_per_node=8 find_lr.py --model_name blagpt
@@ -151,6 +117,16 @@ Steepest gradient learning rate: 3.31e-06
 Elbow point learning rate: 1.20e-01
 Plot saved to: logs/lr_finder_blagpt/lr_finder_plot.png
 Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
+```
+
+## Best Model So Far
+
+- Check `best_model_config.py` for the best model configuration so far.
+
+- You can run the training with the best model config by running:
+
+```bash
+torchrun --standalone --nproc_per_node=8 train.py --run_name best_model --model_name best
 ```
 
 ## Acknowledgements

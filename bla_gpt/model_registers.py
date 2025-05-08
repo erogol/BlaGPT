@@ -8,6 +8,13 @@ def register_blagpt():
 
 
 @register_model
+def register_best():
+    from best_model_config import BestConfig
+    from bla_gpt import GPT
+    return BestConfig, GPT
+
+
+@register_model
 def register_tokenformer():
     from bla_gpt import GPT, TokenformerConfig
     return TokenformerConfig, GPT
