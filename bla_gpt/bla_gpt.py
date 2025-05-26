@@ -321,7 +321,9 @@ class BlockWithTokenEmbedding(Block):
     def __init__(self, config, depth):
         super().__init__(config, depth)
         # Add token embedding layer
-        self.token_embedding = nn.Embedding(config.vocab_size, config.n_embd)
+        self.token_embedding = nn.Embedding(
+            config.vocab_size, config.per_layer_token_emb_dim
+        )
         self.emb_proj_down = nn.Linear(
             config.n_embd, config.per_layer_token_emb_dim, bias=config.bias
         )
@@ -340,7 +342,7 @@ class BlockWithTokenEmbedding(Block):
         x_down = x_down * self.token_embedding(idx)
 
         # Residual up projection
-        x = x + self.emb_proj_up(x_down)
+        return x + self.emb_proj_up(x_down)
 
 
 class ParallelBlock(Block):
