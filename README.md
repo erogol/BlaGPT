@@ -45,7 +45,7 @@ Canon Layer - [link](https://physics.allen-zhu.com/part-4-architecture-design/pa
 
 Parallel Transformer Block - [link](https://arxiv.org/abs/2204.02311) - loss: `3.3473` - peak memory: `40302 MiB`
 
-Per Layer Token Embedding - [link](https://blog.google/technology/developers/gemma-3/) - loss: `WIP` - peak memory: `WIP`
+Per Layer Token Embedding - [link](https://blog.google/technology/developers/gemma-3/) - loss: `3.2411` - peak memory: `40916 MiB`
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
