@@ -1,7 +1,3 @@
-<div align="center">
-  <img src="assets/logo.png" alt="BlaGPT Logo" width="300">
-</div>
-
 # BlaGPT
 
 Experimental playground for benchmarking language model (LM) architectures, layers, and tricks on smaller datasets. Designed for flexible experimentation and exploration.
