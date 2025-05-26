@@ -97,6 +97,7 @@ class GPTConfig(Coqpit):
     use_per_layer_token_emb: bool = (
         True  # Whether to add token embedding to the block input
     )
+    per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
 
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
@@ -313,13 +314,33 @@ class Block(nn.Module):
 
 
 class BlockWithTokenEmbedding(Block):
+    """
+    Based on the explanation in https://old.reddit.com/r/LocalLLaMA/comments/1kuy45r/gemma_3n_architectural_innovations_speculation/
+    """
+
     def __init__(self, config, depth):
         super().__init__(config, depth)
         # Add token embedding layer
         self.token_embedding = nn.Embedding(config.vocab_size, config.n_embd)
+        self.emb_proj_down = nn.Linear(
+            config.n_embd, config.per_layer_token_emb_dim, bias=config.bias
+        )
+        self.emb_proj_up = nn.Linear(
+            config.per_layer_token_emb_dim, config.n_embd, bias=config.bias
+        )
 
     def forward(self, x, idx, *args):
-        return super().forward(x) + self.token_embedding(idx)
+        x = super().forward(x)
+
+        # Residual down projection
+        x_down = self.emb_proj_down(x)
+        x_down = torch.nn.functional.gelu(x_down)
+
+        # Add token embedding to the block input
+        x_down = x_down * self.token_embedding(idx)
+
+        # Residual up projection
+        x = x + self.emb_proj_up(x_down)
 
 
 class ParallelBlock(Block):
