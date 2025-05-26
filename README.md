@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="assets/logo.png" alt="BlaGPT Logo" width="300">
+</div>
+
 # BlaGPT
 
 Experimental playground for benchmarking language model (LM) architectures, layers, and tricks on smaller datasets. Designed for flexible experimentation and exploration.
@@ -44,6 +48,8 @@ Softpick - [link](https://arxiv.org/abs/2504.20966) - loss: `3.3446` - peak memo
 Canon Layer - [link](https://physics.allen-zhu.com/part-4-architecture-design/part-4-1) - loss: `3.3217` - peak memory: `43199 MiB`
 
 Parallel Transformer Block - [link](https://arxiv.org/abs/2204.02311) - loss: `3.3473` - peak memory: `40302 MiB`
+
+Per Layer Token Embedding - [link](https://blog.google/technology/developers/gemma-3/) - loss: `WIP` - peak memory: `WIP`
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`

@@ -13,17 +13,27 @@ from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
-from attentions import (Attention, DilatedAttention, ForgettingAttention,
-                        KVShiftingAttention, MultiheadDiffAttn,
-                        MultiHeadLatentAttention, MultiTokenAttention,
-                        PattentionSelfAttention, soft_cap)
+from attentions import (
+    Attention,
+    DilatedAttention,
+    ForgettingAttention,
+    KVShiftingAttention,
+    MultiheadDiffAttn,
+    MultiHeadLatentAttention,
+    MultiTokenAttention,
+    PattentionSelfAttention,
+    soft_cap,
+)
 from coqpit import Coqpit
 from mlps import MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, Primer_MLP, SwiGLU_MLP
-from modules.pattention import Pattention
 from modules.canon_layer import CanonLayer
+from modules.pattention import Pattention
 from norms import DyTNorm, LayerNorm, RMSNorm
 from torch.nn import functional as F
-from utils import register_model
+
+#
+# Model Configs
+#
 
 
 @dataclass
@@ -46,9 +56,9 @@ class GPTConfig(Coqpit):
     )
 
     # Transformer parameters
-    norm_layer: str = "rmsnorm" # type of normalization layer to use
-    attention: str = "regular" # attention type in `get_attention()`
-    activation: str = "swiglu" # activation type in `get_mlp()`
+    norm_layer: str = "rmsnorm"  # type of normalization layer to use
+    attention: str = "regular"  # attention type in `get_attention()`
+    activation: str = "swiglu"  # activation type in `get_mlp()`
     use_soft_logit_capping: bool = False
     n_kv_head: int = 4  # Number of heads for the key and value (Grouped Query Attention), if n_kv_head == n_head, it is full attention
     tie_embed_weights: bool = True
@@ -63,24 +73,30 @@ class GPTConfig(Coqpit):
         False  # use an embedding layer to add a bias to each token prediction
     )
     use_softpick: bool = False  # use softpick instead of softmax in attention block - https://arxiv.org/html/2504.20966v1
-                                # when True model defaults to vanilla attention instead of flash attention
+    # when True model defaults to vanilla attention instead of flash attention
 
     # Multi-token attention parameters
-    use_key_query_conv=True,
-    query_kernel_size=6,
-    key_kernel_size=11,
-    pre_softmax_key_query=True,
-    use_head_conv=True,
-    head_kernel_size=2,
-    pre_softmax_head=False,
-    use_group_norm=True,
-    apply_key_query_every_n_layers=4
+    use_key_query_conv = (True,)
+    query_kernel_size = (6,)
+    key_kernel_size = (11,)
+    pre_softmax_key_query = (True,)
+    use_head_conv = (True,)
+    head_kernel_size = (2,)
+    pre_softmax_head = (False,)
+    use_group_norm = (True,)
+    apply_key_query_every_n_layers = 4
 
     # Canon layer parameters
     use_canon_layers: bool = False  # Whether to use Canon layers before MLP and Attention blocks (Configs A and C in the paper)
 
     # Parallel Transformer (like PaLM) block parameters
     use_parallel_blocks: bool = False  # Whether to apply attention and mlp blocks in parallel instead of sequentially
+
+    # Transformer block with token embedding parameters
+    # no paper AFAIK but hinted in Gemma3n
+    use_per_layer_token_emb: bool = (
+        True  # Whether to add token embedding to the block input
+    )
 
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
@@ -109,6 +125,21 @@ class GPTConfig(Coqpit):
         }
     )
 
+    def __post_init__(self):
+        # check one of use_canon_layers or use_parallel_blocks or use_per_layer_token_emb is True or None is true
+        if (
+            self.use_canon_layers
+            or self.use_parallel_blocks
+            or self.use_per_layer_token_emb
+        ) and not (
+            self.use_canon_layers
+            ^ self.use_parallel_blocks
+            ^ self.use_per_layer_token_emb
+        ):
+            raise ValueError(
+                "Exactly one of use_canon_layers, use_parallel_blocks, or use_per_layer_token_emb must be True"
+            )
+
 
 @dataclass
 class TokenformerConfig(GPTConfig):
@@ -117,8 +148,8 @@ class TokenformerConfig(GPTConfig):
     block_size: int = 1024
     vocab_size: int = 50304  # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
     n_layer: int = 12
-    n_head: int = 12
-    n_embd: int = 768
+    n_head: int = 8
+    n_embd: int = 128
     dropout: float = 0.0
     bias: bool = False  # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
@@ -132,7 +163,7 @@ class TokenformerConfig(GPTConfig):
     attention: str = "pattention"
     activation: str = "pattention"
     use_soft_logit_capping: bool = False
-    n_kv_head: int = 12  # Number of heads for the key and value (Grouped Query Attention), if n_kv_head == n_head, it is full attention
+    n_kv_head: int = 8  # Number of heads for the key and value (Grouped Query Attention), if n_kv_head == n_head, it is full attention
     tie_embed_weights: bool = True
     zero_init_proj_layers: bool = False
     rmsnorm_before_qk: bool = True
@@ -141,7 +172,7 @@ class TokenformerConfig(GPTConfig):
     use_pre_post_norm: bool = True
 
     # pattention parameters
-    param_token_num: int = 1024
+    param_token_num: int = 4096
 
 
 def compute_z_loss(logits, dim=-1, eps=1e-20):
@@ -164,6 +195,11 @@ def compute_z_loss(logits, dim=-1, eps=1e-20):
     z_loss = torch.mean(z_loss)
 
     return z_loss
+
+
+#
+# Builders
+#
 
 
 def get_attention(config, depth=None):
@@ -228,10 +264,16 @@ class MultiTokenPredictionHead(nn.Module):
         return self.head(x)
 
 
+#
+# Transformer Block Variants
+#
+
+
 class Block(nn.Module):
     """
     A single Transformer block with attention and MLP layers.
     """
+
     def __init__(self, config, depth):
         super().__init__()
         self.ln_1 = get_norm(config)
@@ -260,7 +302,7 @@ class Block(nn.Module):
             return res_weight * x + branch_out
         return x + branch_out
 
-    def forward(self, x):
+    def forward(self, x, *args):
         # Attention branch
         x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1)
 
@@ -268,6 +310,16 @@ class Block(nn.Module):
         x = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, self.res_w2)
 
         return x
+
+
+class BlockWithTokenEmbedding(Block):
+    def __init__(self, config, depth):
+        super().__init__(config, depth)
+        # Add token embedding layer
+        self.token_embedding = nn.Embedding(config.vocab_size, config.n_embd)
+
+    def forward(self, x, idx, *args):
+        return super().forward(x) + self.token_embedding(idx)
 
 
 class ParallelBlock(Block):
@@ -285,7 +337,7 @@ class ParallelBlock(Block):
             branch_out = ln_post(branch_out)
         return branch_out
 
-    def forward(self, x):
+    def forward(self, x, *args):
         # Attention branch - already has causal masking
         x1 = self._process_branch(x, self.ln_1, self.attn, self.ln_3)
 
@@ -302,16 +354,23 @@ class CanonBlock(Block):
     Inherits from the standard Block class and adds causal 1D convolution layers.
 
     """
+
     # NOTE: For some reason, there is future leakage in the CanonBlock, getting very low training loss very fast.
 
     def __init__(self, config, depth, canon_kernel_size=4):
         super().__init__(config, depth)
 
         # Add CanonLayers before attention and MLP
-        self.canon_attn = CanonLayer(hidden_dim=config.n_embd, kernel_size=canon_kernel_size)
-        self.canon_mlp = CanonLayer(hidden_dim=config.n_embd, kernel_size=canon_kernel_size)
+        self.canon_attn = CanonLayer(
+            hidden_dim=config.n_embd, kernel_size=canon_kernel_size
+        )
+        self.canon_mlp = CanonLayer(
+            hidden_dim=config.n_embd, kernel_size=canon_kernel_size
+        )
 
-    def _process_branch(self, x, ln_pre, branch_fn, canon_fn, ln_post=None, res_weight=None):
+    def _process_branch(
+        self, x, ln_pre, branch_fn, canon_fn, ln_post=None, res_weight=None
+    ):
         # Pre-norm
         branch_out = ln_pre(x)
 
@@ -332,14 +391,23 @@ class CanonBlock(Block):
         # Residual connection
         return x + branch_out
 
-    def forward(self, x):
+    def forward(self, x, *args):
         # Attention branch
-        x = self._process_branch(x, self.ln_1, self.attn, self.canon_attn, self.ln_3, self.res_w1)
+        x = self._process_branch(
+            x, self.ln_1, self.attn, self.canon_attn, self.ln_3, self.res_w1
+        )
 
         # MLP branch
-        x = self._process_branch(x, self.ln_2, self.mlp, self.canon_mlp, self.ln_4, self.res_w2)
+        x = self._process_branch(
+            x, self.ln_2, self.mlp, self.canon_mlp, self.ln_4, self.res_w2
+        )
 
         return x
+
+
+#
+# Core Model
+#
 
 
 class GPT(nn.Module):
@@ -351,12 +419,13 @@ class GPT(nn.Module):
         self.soft_cap = 30.0 if config.use_soft_logit_capping else 0.0
         self.zero_init_proj_layers = config.zero_init_proj_layers
 
-
         _Block = Block
         if "use_parallel_blocks" in config and config.use_parallel_blocks:
             _Block = ParallelBlock
         elif "use_canon_layer" in config and config.use_canon_layers:
             _Block = CanonBlock
+        elif "use_per_layer_token_emb" in config and config.use_per_layer_token_emb:
+            _Block = BlockWithTokenEmbedding
 
         self.transformer = nn.ModuleDict(
             dict(
@@ -429,9 +498,9 @@ class GPT(nn.Module):
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
-        assert (
-            t <= self.config.block_size
-        ), f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        assert t <= self.config.block_size, (
+            f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        )
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
 
         # forward the GPT model itself
@@ -444,7 +513,7 @@ class GPT(nn.Module):
         else:
             x = self.transformer.drop(tok_emb)
         for block in self.transformer.h:
-            x = block(x)
+            x = block(x, idx)
         x = self.transformer.ln_f(x)
 
         # TODO: simplify this
@@ -505,7 +574,7 @@ class GPT(nn.Module):
                                 loss += self.config.z_loss_weight * z_loss
 
                             total_loss += loss
-                            loss_dict[f"head{i+1}"] = loss.detach().item()
+                            loss_dict[f"head{i + 1}"] = loss.detach().item()
 
                 # Average the losses across heads
                 loss = total_loss / len(self.prediction_heads)
@@ -588,9 +657,9 @@ class GPT(nn.Module):
         ]
         # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
         # this means that we have to transpose these weights when we import them
-        assert len(sd_keys_hf) == len(
-            sd_keys
-        ), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
+        assert len(sd_keys_hf) == len(sd_keys), (
+            f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
+        )
         for k in sd_keys_hf:
             if any(k.endswith(w) for w in transposed):
                 # special treatment for the Conv1D weights we need to transpose
