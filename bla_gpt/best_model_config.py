@@ -1,4 +1,5 @@
-from dataclasses import field, dataclass
+from dataclasses import dataclass, field
+
 from coqpit import Coqpit
 
 
@@ -7,8 +8,8 @@ class BestConfig(Coqpit):
     """Best model configuration for BLA-GPT.
 
     Results:
-    step:5100/5100 val_loss:3.2923 train_time:3159041ms step_avg:620.64ms
-    peak memory consumption: 40332 MiB
+    step:5100/5100 val_loss:3.2411 train_time:3159041ms step_avg:620.64ms
+    peak memory consumption: 40916 MiB
     """
 
     block_size: int = 1024
@@ -27,9 +28,9 @@ class BestConfig(Coqpit):
     )
 
     # Transformer parameters
-    norm_layer: str = "rmsnorm" # type of normalization layer to use
-    attention: str = "regular" # attention type in `get_attention()`
-    activation: str = "swiglu" # activation type in `get_mlp()`
+    norm_layer: str = "rmsnorm"  # type of normalization layer to use
+    attention: str = "regular"  # attention type in `get_attention()`
+    activation: str = "swiglu"  # activation type in `get_mlp()`
     use_soft_logit_capping: bool = False
     n_kv_head: int = 4  # Number of heads for the key and value (Grouped Query Attention), if n_kv_head == n_head, it is full attention
     tie_embed_weights: bool = True
@@ -44,24 +45,29 @@ class BestConfig(Coqpit):
         False  # use an embedding layer to add a bias to each token prediction
     )
     use_softpick: bool = False  # use softpick instead of softmax in attention block - https://arxiv.org/html/2504.20966v1
-                                # when True model defaults to vanilla attention instead of flash attention
+    # when True model defaults to vanilla attention instead of flash attention
 
     # Multi-token attention parameters
-    use_key_query_conv=True,
-    query_kernel_size=6,
-    key_kernel_size=11,
-    pre_softmax_key_query=True,
-    use_head_conv=True,
-    head_kernel_size=2,
-    pre_softmax_head=False,
-    use_group_norm=True,
-    apply_key_query_every_n_layers=4
+    use_key_query_conv = (True,)
+    query_kernel_size = (6,)
+    key_kernel_size = (11,)
+    pre_softmax_key_query = (True,)
+    use_head_conv = (True,)
+    head_kernel_size = (2,)
+    pre_softmax_head = (False,)
+    use_group_norm = (True,)
+    apply_key_query_every_n_layers = 4
 
     # Canon layer parameters
     use_canon_layers: bool = False  # Whether to use Canon layers before MLP and Attention blocks (Configs A and C in the paper)
 
     # Parallel Transformer (like PaLM) block parameters
     use_parallel_blocks: bool = False  # Whether to apply attention and mlp blocks in parallel instead of sequentially
+
+    use_per_layer_token_emb: bool = (
+        True  # Whether to add token embedding to the block input
+    )
+    per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
 
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
