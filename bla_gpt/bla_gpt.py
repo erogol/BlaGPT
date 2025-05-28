@@ -95,13 +95,18 @@ class GPTConfig(Coqpit):
     # Transformer block with token embedding parameters
     # no paper AFAIK but hinted in Gemma3n
     use_per_layer_token_emb: bool = (
-        True  # Whether to add token embedding to the block input
+        False  # Whether to add token embedding to the block input
     )
     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
 
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
     dilation_rates: list[int] = field(default_factory=lambda: [1, 2, 4, 6, 12])
+
+    # Weight sharing parameters
+    enable_weight_sharing: bool = True  # Whether to enable weight sharing between layers
+    weight_sharing_pattern: list[int] = field(default_factory=lambda: [])  # Pattern for weight sharing: [0, 0, 1, 1] means layers 0&1 share weights, layers 2&3 share weights
+    weight_sharing_groups: int = 1  # Number of weight sharing groups (alternative to pattern specification)
 
     """About z-loss: instability occurs
     when the logits diverge and become very negative, as
@@ -140,6 +145,27 @@ class GPTConfig(Coqpit):
             raise ValueError(
                 "Exactly one of use_canon_layers, use_parallel_blocks, or use_per_layer_token_emb must be True"
             )
+
+        # Validate weight sharing parameters
+        if self.enable_weight_sharing:
+            if self.weight_sharing_pattern and len(self.weight_sharing_pattern) != self.n_layer:
+                raise ValueError(
+                    f"weight_sharing_pattern length ({len(self.weight_sharing_pattern)}) must match n_layer ({self.n_layer})"
+                )
+            if not self.weight_sharing_pattern and self.weight_sharing_groups <= 0:
+                raise ValueError("weight_sharing_groups must be positive when weight_sharing_pattern is not provided")
+            if not self.weight_sharing_pattern and self.weight_sharing_groups > self.n_layer:
+                raise ValueError("weight_sharing_groups cannot exceed n_layer")
+
+            # Generate pattern from groups if pattern not provided
+            if not self.weight_sharing_pattern:
+                layers_per_group = self.n_layer // self.weight_sharing_groups
+                self.weight_sharing_pattern = []
+                for i in range(self.n_layer):
+                    group_id = i // layers_per_group
+                    # Ensure we don't exceed the number of groups
+                    group_id = min(group_id, self.weight_sharing_groups - 1)
+                    self.weight_sharing_pattern.append(group_id)
 
 
 @dataclass
@@ -450,6 +476,21 @@ class GPT(nn.Module):
         elif "use_per_layer_token_emb" in config and config.use_per_layer_token_emb:
             _Block = BlockWithTokenEmbedding
 
+        # Create transformer blocks with weight sharing support
+        if config.enable_weight_sharing:
+            # Create unique blocks for each group
+            unique_blocks = {}
+            for group_id in set(config.weight_sharing_pattern):
+                unique_blocks[group_id] = _Block(config, group_id)
+
+            # Create the layer list with shared references
+            blocks = []
+            for layer_idx in range(config.n_layer):
+                group_id = config.weight_sharing_pattern[layer_idx]
+                blocks.append(unique_blocks[group_id])
+        else:
+            blocks = [_Block(config, d) for d in range(config.n_layer)]
+
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.vocab_size, config.n_embd),
@@ -457,7 +498,7 @@ class GPT(nn.Module):
                 if not config.pos_encoding not in [None, "none"]
                 else None,
                 drop=nn.Dropout(config.dropout),
-                h=nn.ModuleList([_Block(config, d) for d in range(config.n_layer)]),
+                h=nn.ModuleList(blocks),
                 ln_f=get_norm(config),
             )
         )
@@ -504,11 +545,57 @@ class GPT(nn.Module):
         For non-embedding count (default), the position embeddings get subtracted.
         The token embeddings would too, except due to the parameter sharing these
         params are actually used as weights in the final layer, so we include them.
+
+        When weight sharing is enabled, counts unique parameters only (shared parameters
+        are counted once rather than multiple times).
         """
-        n_params = sum(p.numel() for p in self.parameters())
+        if self.config.enable_weight_sharing:
+            # Count unique parameters only when weight sharing is enabled
+            unique_params = set()
+            for p in self.parameters():
+                unique_params.add(id(p))
+            n_params = sum(p.numel() for p in self.parameters() if id(p) in unique_params)
+        else:
+            # Standard parameter counting when no weight sharing
+            n_params = sum(p.numel() for p in self.parameters())
+
         if non_embedding and self.transformer.wpe is not None:
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
+
+    def get_weight_sharing_info(self):
+        """
+        Return detailed information about weight sharing in the model.
+        Returns a dictionary with sharing statistics and patterns.
+        """
+        if not self.config.enable_weight_sharing:
+            return {
+                "enabled": False,
+                "total_layers": self.config.n_layer,
+                "unique_layers": self.config.n_layer,
+                "sharing_pattern": None,
+                "parameter_reduction": 0.0
+            }
+
+        unique_groups = len(set(self.config.weight_sharing_pattern))
+        total_params_without_sharing = self.config.n_layer * sum(
+            p.numel() for p in self.transformer.h[0].parameters()
+        )
+        total_params_with_sharing = unique_groups * sum(
+            p.numel() for p in self.transformer.h[0].parameters()
+        )
+        parameter_reduction = 1.0 - (total_params_with_sharing / total_params_without_sharing)
+
+        return {
+            "enabled": True,
+            "total_layers": self.config.n_layer,
+            "unique_layers": unique_groups,
+            "sharing_pattern": self.config.weight_sharing_pattern.copy(),
+            "parameter_reduction": parameter_reduction,
+            "layers_per_group": [
+                self.config.weight_sharing_pattern.count(i) for i in range(unique_groups)
+            ]
+        }
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
