@@ -104,7 +104,7 @@ class GPTConfig(Coqpit):
     dilation_rates: list[int] = field(default_factory=lambda: [1, 2, 4, 6, 12])
 
     # Weight sharing parameters
-    enable_weight_sharing: bool = True  # Whether to enable weight sharing between layers
+    enable_weight_sharing: bool = False  # Whether to enable weight sharing between layers
     weight_sharing_pattern: list[int] = field(default_factory=lambda: [])  # Pattern for weight sharing: [0, 0, 1, 1] means layers 0&1 share weights, layers 2&3 share weights
     weight_sharing_groups: int = 1  # Number of weight sharing groups (alternative to pattern specification)
 
