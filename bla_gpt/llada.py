@@ -466,6 +466,13 @@ class LLaDA(nn.Module):
                 'time_steps': t
             }, loss
 
+    def validate(self, input_ids, targets):
+        with torch.no_grad():
+            # ❗FIXIT
+            targets = input_ids
+            loss = self.evaluate_cross_entropy(input_ids, targets)
+        return None, loss
+
     def evaluate_likelihood(
         self,
         input_ids: torch.Tensor,
