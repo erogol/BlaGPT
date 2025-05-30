@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 import tiktoken
 from typing import Optional, Dict, Tuple, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from coqpit import Coqpit
 
 
@@ -15,6 +15,18 @@ class LLaDAConfig(Coqpit):
     # override train config parameters
     compile_model: bool = True
     num_iterations: int = 5100 * 100
+
+    learning_rate: float = 1e-4
+    optimizer_name: str = (
+        "AdamW"  # check get_optimizer() in bla_gpt/optimizers/__init__.py
+    )
+    optimizer_args: dict = field(
+        default_factory=lambda: {
+            "betas": (0.9, 0.95),
+            "eps": 1e-8,
+            "weight_decay": 0.1,
+        }
+    )
 
     # Model architecture parameters
     vocab_size: int = 50304  # Vocabulary size
@@ -469,8 +481,7 @@ class LLaDA(nn.Module):
     def validate(self, input_ids, targets):
         with torch.no_grad():
             # ❗FIXIT
-            targets = input_ids
-            loss = self.evaluate_cross_entropy(input_ids, targets)
+            loss = self.evaluate_cross_entropy(input_ids)
         return None, loss
 
     def evaluate_likelihood(

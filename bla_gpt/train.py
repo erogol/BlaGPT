@@ -368,10 +368,7 @@ if __name__ == "__main__":
                 for _ in range(val_steps):
                     x_val, y_val = val_loader.next_batch()
                     with ctx:  # of course, we'd like to use no_grad() here too, but that creates a torch.compile error for some reason
-                        if hasattr(model, 'validate'):
-                            _,  loss = model.validate(x_val, y_val)
-                        else:
-                            _, loss = model.forward(x_val, y_val)
+                        _, loss = model(x_val, y_val)
                         metrics = None
                         if type(loss) is dict:
                             metrics = {k: v for k, v in loss.items() if k != "total"}
