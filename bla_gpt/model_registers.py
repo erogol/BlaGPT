@@ -54,3 +54,9 @@ def register_rwkv7():
 def register_zamba():
     from bla_gpt.zamba2.config import MambaConfig, MambaModel
     return MambaConfig, MambaModel
+
+
+@register_model
+def register_llada():
+    from llada import LLaDA, LLaDAConfig
+    return LLaDAConfig, LLaDA
