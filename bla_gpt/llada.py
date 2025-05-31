@@ -52,6 +52,7 @@ class LLaDAConfig(Coqpit):
 
     # Positional encoding
     rope_theta: float = 10000.0  # RoPE theta parameter
+    rope_full_precision: bool = True  # Use full precision for RoPE computations
 
     def __post_init__(self):
         # Set mask_token_id to vocab_size if not specified
@@ -76,8 +77,15 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
 
-    def forward(self, x):
-        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        with torch.autocast(enabled=False, device_type=x.device.type):
+            og_dtype = x.dtype
+            x = x.to(torch.float32)
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + self.eps)
+            x = x.to(og_dtype)
+        
+        return self.weight * x
 
 
 class SwiGLU(nn.Module):
@@ -94,10 +102,11 @@ class SwiGLU(nn.Module):
 
 class RotaryPositionalEmbedding(nn.Module):
     """Rotary Position Embedding (RoPE)"""
-    def __init__(self, dim: int, max_seq_len: int = 4096):
+    def __init__(self, dim: int, max_seq_len: int = 4096, rope_full_precision: bool = True):
         super().__init__()
         self.dim = dim
         self.max_seq_len = max_seq_len
+        self.rope_full_precision = rope_full_precision
 
         # Precompute frequency tensor
         inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
@@ -109,24 +118,38 @@ class RotaryPositionalEmbedding(nn.Module):
         emb = torch.cat([freqs, freqs], dim=-1)
         self.register_buffer('cos_cached', emb.cos())
         self.register_buffer('sin_cached', emb.sin())
+        
+        # Type annotations for registered buffers
+        self.cos_cached: torch.Tensor
+        self.sin_cached: torch.Tensor
 
     def rotate_half(self, x):
         x1, x2 = x[..., :x.shape[-1]//2], x[..., x.shape[-1]//2:]
         return torch.cat([-x2, x1], dim=-1)
 
     def forward(self, q, k, seq_len):
-        cos = self.cos_cached[:seq_len, :]
-        sin = self.sin_cached[:seq_len, :]
+        if self.rope_full_precision:
+            q_, k_ = q.float(), k.float()
+        else:
+            q_, k_ = q, k
 
-        q_embed = (q * cos) + (self.rotate_half(q) * sin)
-        k_embed = (k * cos) + (self.rotate_half(k) * sin)
+        with torch.autocast(q.device.type, enabled=False):
+            cos = self.cos_cached[:seq_len, :]
+            sin = self.sin_cached[:seq_len, :]
+            
+            # Ensure cos and sin have the same dtype as q_ and k_
+            cos = cos.to(q_.dtype)
+            sin = sin.to(q_.dtype)
 
-        return q_embed, k_embed
+            q_embed = (q_ * cos) + (self.rotate_half(q_) * sin)
+            k_embed = (k_ * cos) + (self.rotate_half(k_) * sin)
+
+        return q_embed.to(q.dtype), k_embed.to(k.dtype)
 
 
 class MultiHeadAttention(nn.Module):
     """Multi-head attention without causal masking (bidirectional)"""
-    def __init__(self, dim: int, n_heads: int, max_seq_len: int = 4096):
+    def __init__(self, dim: int, n_heads: int, max_seq_len: int = 4096, rope_full_precision: bool = True):
         super().__init__()
         self.dim = dim
         self.n_heads = n_heads
@@ -139,7 +162,7 @@ class MultiHeadAttention(nn.Module):
         self.v_proj = nn.Linear(dim, dim, bias=False)
         self.o_proj = nn.Linear(dim, dim, bias=False)
 
-        self.rope = RotaryPositionalEmbedding(self.head_dim, max_seq_len)
+        self.rope = RotaryPositionalEmbedding(self.head_dim, max_seq_len, rope_full_precision)
 
     def forward(self, x: torch.Tensor, attention_mask: Optional[torch.Tensor] = None):
         batch_size, seq_len, _ = x.shape
@@ -171,9 +194,9 @@ class MultiHeadAttention(nn.Module):
 
 class TransformerBlock(nn.Module):
     """Transformer block without causal masking"""
-    def __init__(self, dim: int, n_heads: int, ffn_dim: int, max_seq_len: int = 4096):
+    def __init__(self, dim: int, n_heads: int, ffn_dim: int, max_seq_len: int = 4096, rope_full_precision: bool = True):
         super().__init__()
-        self.attention = MultiHeadAttention(dim, n_heads, max_seq_len)
+        self.attention = MultiHeadAttention(dim, n_heads, max_seq_len, rope_full_precision)
         self.feed_forward = SwiGLU(dim, ffn_dim)
         self.attention_norm = RMSNorm(dim)
         self.ffn_norm = RMSNorm(dim)
@@ -198,7 +221,8 @@ class MaskPredictor(nn.Module):
         n_heads: int = 32,
         ffn_dim: int = 12288,
         max_seq_len: int = 4096,
-        mask_token_id: int = None
+        mask_token_id: int = None,
+        rope_full_precision: bool = True
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -211,7 +235,7 @@ class MaskPredictor(nn.Module):
 
         # Transformer layers
         self.layers = nn.ModuleList([
-            TransformerBlock(dim, n_heads, ffn_dim, max_seq_len)
+            TransformerBlock(dim, n_heads, ffn_dim, max_seq_len, rope_full_precision)
             for _ in range(n_layers)
         ])
 
@@ -281,7 +305,8 @@ class LLaDA(nn.Module):
             n_heads=config.n_heads,
             ffn_dim=config.ffn_dim,
             max_seq_len=config.max_seq_len,
-            mask_token_id=self.mask_token_id
+            mask_token_id=self.mask_token_id,
+            rope_full_precision=config.rope_full_precision
         )
 
     @classmethod
@@ -1312,7 +1337,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Checkpoint path (modify this to your checkpoint location)
-    checkpoint_path = "/home/ubuntu/BlaGPT/bla_gpt/logs/llada_4/best_model_5100.pt"  # Update this path
+    checkpoint_path = "/home/ubuntu/BlaGPT/bla_gpt/logs/llada_long_6/best_model_133625.pt"  # Update this path
 
     # Try to load from checkpoint, otherwise create new model
     try:
