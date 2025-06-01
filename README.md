@@ -64,7 +64,7 @@ Hymba - [link](https://arxiv.org/html/2411.13676v1) - train step time is signifi
 
 Tokenformer (in BlaGPT model) - [link](https://github.com/Haiyang-W/TokenFormer) - loss: `3.390`
 
-LLaDa (dLLM) - [link](https://arxiv.org/abs/2502.09992)
+LLaDa (dLLM) - [link](https://arxiv.org/abs/2502.09992) - val-loss: `8.6930`, xentropy-loss: `4.2891` (comparable to other models and estimated by `llada_validation_cross_entropy.py`),
 
 ## Optimizers
 PaLMForeachSOAP - [link](https://github.com/ClashLuke/HeavyBall) - almost 2 times slower than Adam but the best results
