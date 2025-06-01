@@ -84,7 +84,7 @@ class RMSNorm(nn.Module):
             variance = x.pow(2).mean(-1, keepdim=True)
             x = x * torch.rsqrt(variance + self.eps)
             x = x.to(og_dtype)
-        
+
         return self.weight * x
 
 
@@ -118,7 +118,7 @@ class RotaryPositionalEmbedding(nn.Module):
         emb = torch.cat([freqs, freqs], dim=-1)
         self.register_buffer('cos_cached', emb.cos())
         self.register_buffer('sin_cached', emb.sin())
-        
+
         # Type annotations for registered buffers
         self.cos_cached: torch.Tensor
         self.sin_cached: torch.Tensor
@@ -136,7 +136,7 @@ class RotaryPositionalEmbedding(nn.Module):
         with torch.autocast(q.device.type, enabled=False):
             cos = self.cos_cached[:seq_len, :]
             sin = self.sin_cached[:seq_len, :]
-            
+
             # Ensure cos and sin have the same dtype as q_ and k_
             cos = cos.to(q_.dtype)
             sin = sin.to(q_.dtype)
@@ -656,7 +656,8 @@ class LLaDA(nn.Module):
         prompt_text: str = "",
         max_length: int = 512,
         num_steps: int = None,
-        temperature: float = None
+        temperature: float = None,
+        **kwargs
     ) -> str:
         """
         Generate text from a text prompt using the reverse diffusion process
@@ -686,7 +687,8 @@ class LLaDA(nn.Module):
             max_length=max_length,
             num_steps=num_steps or 256,
             temperature=temperature or 1.0,
-            return_text=True
+            return_text=True,
+            **kwargs
         )
 
     def generate(
@@ -703,7 +705,7 @@ class LLaDA(nn.Module):
         return_text: bool = False
     ) -> Union[torch.Tensor, str, list]:
         """
-        Generate text using the reverse diffusion process with advanced sampling strategies
+        Generate text using the reverse diffusion process
 
         Args:
             prompt_ids: Optional prompt token IDs (batch_size, prompt_len)
@@ -1147,16 +1149,10 @@ def load_checkpoint(checkpoint_path: str, config: LLaDAConfig, device: str = 'cp
 
     # Load checkpoint
     checkpoint = torch.load(checkpoint_path, map_location=device)
-
-    # Handle different checkpoint formats
-    if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"Loaded model from epoch {checkpoint.get('epoch', 'unknown')}")
-        if 'loss' in checkpoint:
-            print(f"Checkpoint loss: {checkpoint['loss']:.4f}")
-    else:
-        # Assume the checkpoint is just the state dict
-        model.load_state_dict(checkpoint)
+    new_state_dict = {}
+    for key in checkpoint['model']:
+        new_state_dict[key.replace('_orig_mod.', '')] = checkpoint['model'][key]
+    model.load_state_dict(new_state_dict)
 
     model.to(device)
     model.eval()
@@ -1337,12 +1333,12 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Checkpoint path (modify this to your checkpoint location)
-    checkpoint_path = "/home/ubuntu/BlaGPT/bla_gpt/logs/llada_long_6/best_model_133625.pt"  # Update this path
+    checkpoint_path = "/home/ubuntu/BlaGPT/bla_gpt/logs/llada_long_7/best_model_9125.pt"  # Update this path
 
     # Try to load from checkpoint, otherwise create new model
     try:
         # Create config with tiktoken (use smaller model for demo)
-        config = create_llada_1b_tiktoken()
+        config = LLaDAConfig()
 
         # Try to load checkpoint
         import os
@@ -1392,7 +1388,8 @@ if __name__ == "__main__":
                 prompt_text=prompt,
                 max_length=32,
                 num_steps=64,
-                temperature=0.8
+                temperature=0.8,
+                remasking_strategy="semi_autoregressive"
             )
             print(f"Generated: '{generated}'")
         except Exception as e:
@@ -1437,7 +1434,8 @@ if __name__ == "__main__":
                     prompt_text=prompt_text,
                     max_length=64,
                     num_steps=128,
-                    temperature=0.8
+                    temperature=0.4,
+                    remasking_strategy="low_confidence"
                 )
 
             print(f"Generated text: '{generated_text}'")
