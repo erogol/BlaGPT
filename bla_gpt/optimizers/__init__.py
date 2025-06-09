@@ -90,6 +90,9 @@ def get_optimizer(
             adamw_params=adamw_params,
             **optimizer_params
         )
+    elif optimizer_name.lower() == "biclip":
+        from optimizers.bliclip import BiClipSGD_Full
+        return BiClipSGD_Full(parameters, lr=lr, **optimizer_params)
     else:
         optimizer = getattr(torch.optim, optimizer_name)
     return optimizer(parameters, lr=lr, **optimizer_params)
