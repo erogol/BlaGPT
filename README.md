@@ -89,6 +89,7 @@ MARS - [link](https://github.com/AGI-Arena/MARS) - loss: `3.3459`, peak VRAM: 40
 
 Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak VRAM: `40332MB`, step_time: `620.24ms`
 
+BiClip - [link](https://arxiv.org/pdf/2502.04164) - (not working well) loss: `7.2292`, peak VRAM: `39751 MiB`, step_time: `510ms`
 
 ## Adding a New Model
 
