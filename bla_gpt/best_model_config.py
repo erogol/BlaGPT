@@ -2,9 +2,11 @@ from dataclasses import dataclass, field
 
 from coqpit import Coqpit
 
+from bla_gpt import GPTConfig
+
 
 @dataclass
-class BestConfig(Coqpit):
+class BestConfig(GPTConfig):
     """Best model configuration for BLA-GPT.
 
     Results:
