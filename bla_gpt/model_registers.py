@@ -85,3 +85,10 @@ def register_avey():
     from avey import Avey, AveyConfig
 
     return AveyConfig, Avey
+
+
+@register_model
+def register_hierarchical():
+    from aunet import HierarchicalConfig, HierarchicalTransformer
+
+    return HierarchicalConfig, HierarchicalTransformer
