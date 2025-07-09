@@ -1,18 +1,19 @@
 import datetime
 import glob
+import json
 import os
 import subprocess
 import sys
 import time
 from argparse import ArgumentParser
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.distributed as dist
 from coqpit import Coqpit
-from torch.cuda.amp import autocast
+from torch.amp.autocast_mode import autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from utils import get_model
 
@@ -25,24 +26,90 @@ os.environ["NCCL_TIMEOUT"] = "1800"
 class Hyperparameters(Coqpit):
     """Training hyperparameters configuration."""
 
-    run_name: str = "nano_gpt+rms_norm+geglu+gqa+softcap"
-    compile_model: bool = True
-    input_bin: str = "../data/fineweb10B/fineweb_train_*.bin"
-    input_val_bin: str = "../data/fineweb10B/fineweb_val_*.bin"
-    batch_size: int = 8 * 64
-    device_batch_size: int = 32
-    sequence_length: int = 1024
-    num_iterations: int = 5100
-    learning_rate: float = 4e-4
-    warmup_iters: int = 250
-    warmdown_iters: int = 2000
-    weight_decay: float = 0
-    val_loss_every: int = 125
-    val_tokens: int = 10485760
-    save_every: int = 5000
-    keep_last_n_checkpoints: int = 5
-    save_best_model: bool = True
-    precision: str = "bfloat16"
+    run_name: str = field(
+        default="nano_gpt+rms_norm+geglu+gqa+softcap",
+        metadata={"help": "Name for this training run"}
+    )
+    compile_model: bool = field(
+        default=False,
+        metadata={"help": "Compile model with torch.compile for better performance"}
+    )
+    input_bin: str = field(
+        default="../data/fineweb10B/fineweb_train_*.bin",
+        metadata={"help": "Pattern for training data files (BPE tokenized)"}
+    )
+    input_val_bin: str = field(
+        default="../data/fineweb10B/fineweb_val_*.bin",
+        metadata={"help": "Pattern for validation data files (BPE tokenized)"}
+    )
+    byte_level_training: bool = field(
+        default=False,
+        metadata={"help": "Enable byte-level training mode"}
+    )
+    text_data_dir: str = field(
+        default="../data/fineweb10B_text",
+        metadata={"help": "Directory containing text data (.jsonl files)"}
+    )
+    byte_data_dir: str = field(
+        default="../data/fineweb10B_bytes",
+        metadata={"help": "Directory containing byte data (.bin files)"}
+    )
+    batch_size: int = field(
+        default=8 * 64,
+        metadata={"help": "Total batch size across all devices"}
+    )
+    device_batch_size: int = field(
+        default=32,
+        metadata={"help": "Batch size per device"}
+    )
+    sequence_length: int = field(
+        default=1024,
+        metadata={"help": "Maximum sequence length for training"}
+    )
+    num_iterations: int = field(
+        default=5100,
+        metadata={"help": "Number of training iterations"}
+    )
+    learning_rate: float = field(
+        default=0.001,
+        metadata={"help": "Learning rate for optimizer"}
+    )
+    warmup_iters: int = field(
+        default=250,
+        metadata={"help": "Number of warmup iterations"}
+    )
+    warmdown_iters: int = field(
+        default=2000,
+        metadata={"help": "Number of warmdown iterations"}
+    )
+    weight_decay: float = field(
+        default=0,
+        metadata={"help": "Weight decay coefficient"}
+    )
+    val_loss_every: int = field(
+        default=125,
+        metadata={"help": "Validate every N iterations"}
+    )
+    val_tokens: int = field(
+        default=10485760,
+        metadata={"help": "Number of tokens for validation"}
+    )
+    save_every: int = field(
+        default=5000,
+        metadata={"help": "Save checkpoint every N iterations"}
+    )
+    keep_last_n_checkpoints: int = field(
+        default=1,
+        metadata={"help": "Number of recent checkpoints to keep"}
+    )
+    save_best_model: bool = field(
+        default=True,
+        metadata={"help": "Save best model based on validation loss"}
+    )
+    precision: str = field(
+        default="bfloat16",
+        metadata={"help": "Training precision (float32 or bfloat16)"}
+    )
 
 
 class TeeLogger:
@@ -105,6 +172,41 @@ class DataShard:
         return tokens
 
 
+class ByteDataShard:
+    """Handles loading and validation of byte-level data shards."""
+
+    MAGIC_NUMBER = 20240520
+    HEADER_SIZE = 256 * 4
+    VERSION = 1
+
+    @staticmethod
+    def peek_byte_data_shard(filename: str) -> int:
+        with open(filename, "rb") as f:
+            header = np.frombuffer(f.read(ByteDataShard.HEADER_SIZE), dtype=np.int32)
+
+        if header[0] != ByteDataShard.MAGIC_NUMBER:
+            print("ERROR: magic number mismatch in the byte data .bin file!")
+            print("---> HINT: Are you passing in a correct byte-level data file?")
+            print("---> HINT: For byte-level training, use fineweb_bytes.py to generate data")
+            exit(1)
+        assert header[1] == ByteDataShard.VERSION, "Unsupported version"
+        return header[2]
+
+    @staticmethod
+    def load_byte_data_shard(filename: str) -> np.ndarray:
+        with open(filename, "rb") as f:
+            header = np.frombuffer(f.read(ByteDataShard.HEADER_SIZE), dtype=np.int32)
+            assert header[0] == ByteDataShard.MAGIC_NUMBER, "Magic number mismatch"
+            assert header[1] == ByteDataShard.VERSION, "Unsupported version"
+            nbytes = header[2]
+            bytes_data = np.frombuffer(f.read(), dtype=np.uint8)
+
+        assert len(bytes_data) == nbytes, "Byte count mismatch"
+        return bytes_data
+
+
+
+
 class DistributedDataLoader:
     """Distributed data loader for handling multiple data shards."""
 
@@ -115,11 +217,13 @@ class DistributedDataLoader:
         seq_length: int,
         process_rank: int,
         num_processes: int,
+        byte_level_training: bool = False,
     ):
         self.process_rank = process_rank
         self.num_processes = num_processes
         self.batch_size = batch_size
         self.seq_length = seq_length
+        self.byte_level_training = byte_level_training
 
         self.files = sorted(glob.glob(filename_pattern))
         if not self.files:
@@ -128,12 +232,32 @@ class DistributedDataLoader:
         self.ntok_total = self._validate_shards()
         self.reset()
 
+    def _load_shard_data(self, filename: str) -> np.ndarray:
+        """Load data from a shard file based on training mode and file type."""
+        if self.byte_level_training:
+            if filename.endswith('.bin'):
+                return ByteDataShard.load_byte_data_shard(filename)
+            else:
+                raise ValueError(f"Byte-level training only supports .bin files, got: {filename}")
+        else:
+            return DataShard.load_data_shard(filename)
+
+    def _get_shard_size(self, filename: str) -> int:
+        """Get the size of a shard file based on training mode and file type."""
+        if self.byte_level_training:
+            if filename.endswith('.bin'):
+                return ByteDataShard.peek_byte_data_shard(filename)
+            else:
+                raise ValueError(f"Byte-level training only supports .bin files, got: {filename}")
+        else:
+            return DataShard.peek_data_shard(filename)
+
     def _validate_shards(self) -> int:
         ntok_total = 0
         min_required = self.num_processes * self.batch_size * self.seq_length + 1
 
         for fname in self.files:
-            shard_ntok = DataShard.peek_data_shard(fname)
+            shard_ntok = self._get_shard_size(fname)
             assert shard_ntok >= min_required, f"Shard {fname} too small"
             ntok_total += int(shard_ntok)
         return ntok_total
@@ -141,20 +265,27 @@ class DistributedDataLoader:
     def reset(self):
         self.current_shard = 0
         self.current_position = self.process_rank * self.batch_size * self.seq_length
-        self.tokens = DataShard.load_data_shard(self.files[self.current_shard])
+        self.tokens = self._load_shard_data(self.files[self.current_shard])
 
     def advance(self):
         self.current_shard = (self.current_shard + 1) % len(self.files)
         self.current_position = self.process_rank * self.batch_size * self.seq_length
-        self.tokens = DataShard.load_data_shard(self.files[self.current_shard])
+        self.tokens = self._load_shard_data(self.files[self.current_shard])
 
     def next_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
         B, T = self.batch_size, self.seq_length
         buf = self.tokens[self.current_position : self.current_position + B * T + 1]
+
+        # Convert to tensor - both bytes and tokens need to be long for model input
         buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
 
         x = (buf[:-1]).view(B, T)
         y = (buf[1:]).view(B, T)
+
+        # For debugging: print max value to check data range
+        if self.byte_level_training:
+            assert x.max().item() < 256, f"Byte value out of range: {x.max().item()}"
+        # print(x.max().item())
 
         self.current_position += B * T * self.num_processes
         if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
@@ -170,8 +301,7 @@ class Trainer:
         self, args: Hyperparameters, model_name: str, config_path: Optional[str] = None
     ):
         self.args = args
-        with open(sys.argv[0]) as f:
-            self.code = f.read()
+
         self.setup_distributed()
         self.setup_model(model_name, config_path)
         self.setup_optimization()
@@ -200,27 +330,54 @@ class Trainer:
         if config_path:
             self.model_config.load_json(config_path)
 
+        # Override Hyperparameters with matching model_config attributes
+        overridden_params = []
+        for key, value in self.model_config.to_dict().items():
+            if hasattr(self.args, key):
+                old_value = getattr(self.args, key)
+                if old_value != value:
+                    overridden_params.append((key, old_value, value))
+                setattr(self.args, key, value)
+
+        # Log overridden parameters (only on master process)
+        if overridden_params and self.is_master:
+            print("Hyperparameters overridden by model config:")
+            for key, old_val, new_val in overridden_params:
+                print(f"  {key}: {old_val} -> {new_val}")
+
+        # Validate vocab size for byte-level training
+        if self.args.byte_level_training:
+            if hasattr(self.model_config, 'vocab_size') and self.model_config.vocab_size != 256:
+                raise ValueError(
+                    f"Byte-level training requires vocab_size=256, but model config has vocab_size={self.model_config.vocab_size}. "
+                    f"Please update your model configuration for byte-level training."
+                )
+            elif hasattr(self.model_config, 'vocab_size'):
+                print(f"✓ Vocab size validation passed: {self.model_config.vocab_size} (suitable for byte-level training)")
+
         self.model = model_cls(self.model_config).cuda()
 
         if self.args.compile_model:
+            print("Compiling the model...")
             self.model = torch.compile(self.model)
+            print("✓ Model compilation passed")
 
         self.model = DDP(
             self.model, device_ids=[self.local_rank], find_unused_parameters=True
         )
         self.raw_model = self.model.module
         self.ctx = autocast(
-            dtype=torch.bfloat16 if self.args.precision == "bfloat16" else torch.float32
+            device_type="cuda", dtype=torch.bfloat16 if self.args.precision == "bfloat16" else torch.float32
         )
 
     def setup_optimization(self):
         """Initialize optimizer and learning rate scheduler."""
-        self.optimizer = torch.optim.AdamW(
+        self.optimizer = torch.optim.Adam(
             self.raw_model.parameters(),
             lr=self.args.learning_rate,
             betas=(0.9, 0.95),
+            eps=1e-8,
             weight_decay=self.args.weight_decay,
-            fused=True,
             foreach=False,
         )
 
@@ -243,21 +400,75 @@ class Trainer:
 
     def setup_data_loaders(self):
         """Initialize training and validation data loaders."""
-        self.train_loader = DistributedDataLoader(
-            self.args.input_bin,
-            self.args.device_batch_size,
-            self.args.sequence_length,
-            self.rank,
-            self.world_size,
-        )
+        if self.args.byte_level_training:
+            if self.is_master:
+                print("Setting up byte-level training data loaders...")
 
-        self.val_loader = DistributedDataLoader(
-            self.args.input_val_bin,
-            self.args.device_batch_size,
-            self.args.sequence_length,
-            self.rank,
-            self.world_size,
-        )
+            # Try binary byte shards first, fallback to text shards
+            train_pattern = os.path.join(self.args.byte_data_dir, "fineweb_train_*.bin")
+            val_pattern = os.path.join(self.args.byte_data_dir, "fineweb_val_*.bin")
+
+            # Check if binary files exist
+            train_files = glob.glob(train_pattern)
+            val_files = glob.glob(val_pattern)
+
+            if not train_files:
+                raise ValueError(f"No byte-level training files found at {train_pattern}. "
+                               f"Please generate byte data using fineweb_bytes.py first.")
+
+            # If validation files don't exist, use a subset of training files
+            if not val_files:
+                if self.is_master:
+                    print(f"No validation files found at {val_pattern}")
+                    print("Using training files for validation...")
+                val_pattern = train_pattern
+
+            if self.is_master:
+                print(f"Using binary files for byte-level training")
+                print(f"Training files: {len(glob.glob(train_pattern))}")
+                print(f"Validation files: {len(glob.glob(val_pattern))}")
+        else:
+            train_pattern = self.args.input_bin
+            val_pattern = self.args.input_val_bin
+
+            if self.is_master:
+                print("Setting up BPE token-level training data loaders...")
+                print(f"Training pattern: {train_pattern}")
+                print(f"Validation pattern: {val_pattern}")
+
+        try:
+            self.train_loader = DistributedDataLoader(
+                train_pattern,
+                self.args.device_batch_size,
+                self.args.sequence_length,
+                self.rank,
+                self.world_size,
+                self.args.byte_level_training,
+            )
+
+            self.val_loader = DistributedDataLoader(
+                val_pattern,
+                self.args.device_batch_size,
+                self.args.sequence_length,
+                self.rank,
+                self.world_size,
+                self.args.byte_level_training,
+            )
+        except Exception as e:
+            if self.is_master:
+                print(f"Error setting up data loaders: {e}")
+                print("\nTroubleshooting:")
+                if self.args.byte_level_training:
+                    print("For byte-level training:")
+                    print(f"- Ensure byte data directory exists: {self.args.byte_data_dir}")
+                    print("- Run: cd ../data && python fineweb_bytes.py --version 10B")
+                    print("- Check that .bin files are present in the byte_data_dir")
+                else:
+                    print("For BPE token training:")
+                    print(f"- Check input_bin path: {self.args.input_bin}")
+                    print(f"- Check input_val_bin path: {self.args.input_val_bin}")
+                    print("- Run: cd ../data && python fineweb.py --version 10B")
+            raise
 
         self.train_accumulation_steps = self.args.batch_size // (
             self.args.device_batch_size * self.world_size
@@ -266,6 +477,17 @@ class Trainer:
         self.val_steps = self.args.val_tokens // (
             self.args.device_batch_size * self.args.sequence_length * self.world_size
         )
+
+        if self.is_master:
+            print(f"Data loader setup complete:")
+            print(f"  Total training tokens: {self.train_loader.ntok_total:,}")
+            print(f"  Total validation tokens: {self.val_loader.ntok_total:,}")
+            print(f"  Training accumulation steps: {self.train_accumulation_steps}")
+            print(f"  Validation steps: {self.val_steps}")
+            if self.args.byte_level_training:
+                print(f"  Vocabulary size: 256 (byte-level)")
+            else:
+                print(f"  Vocabulary size: {getattr(self.model_config, 'vocab_size', 'Unknown')}")
 
     def setup_logging(self):
         """Initialize logging directory and files."""
@@ -286,21 +508,16 @@ class Trainer:
 
     def _log_initial_info(self):
         """Log initial information about the training run."""
-        print("=" * 100)
-        print(self.code)
-        print("=" * 100)
+
         print(
             f"Running pytorch {torch.__version__} compiled for CUDA {torch.version.cuda}"
         )
-        print("nvidia-smi:")
 
-        result = subprocess.run(
-            ["nvidia-smi"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        print(f"{result.stdout}")
+        print("=" * 100)
+        print(f"Byte-level training: {'Enabled' if self.args.byte_level_training else 'Disabled'}")
+        if self.args.byte_level_training:
+            print(f"Text data directory: {self.args.text_data_dir}")
+            print(f"Vocab size: 256 (bytes)")
         print("=" * 100)
 
     def validate(self) -> float:
@@ -326,7 +543,6 @@ class Trainer:
         """Save model checkpoint."""
         log = {
             "step": step,
-            "code": self.code,
             "model_config": self.model_config.to_dict(),
             "train_config": self.args.to_dict(),
             "model": self.raw_model.state_dict(),
@@ -350,7 +566,6 @@ class Trainer:
         """Save model if it has the best validation loss so far."""
         log = {
             "step": step,
-            "code": self.code,
             "model_config": self.model_config.to_dict(),
             "train_config": self.args.to_dict(),
             "model": self.raw_model.state_dict(),
@@ -499,14 +714,59 @@ class Trainer:
 def main():
     """Entry point for training."""
     parser = ArgumentParser()
-    parser.add_argument("--config", type=str, default=None)
-    parser.add_argument("--run_name", type=str, default=None)
-    parser.add_argument("--model_name", type=str, default="bla_gpt")
+    parser.add_argument("--config", type=str, default=None, help="Path to model config file")
+    parser.add_argument("--model_name", type=str, default="bla_gpt", help="Model architecture to use")
+
+    # Get default hyperparameters and add them to argument parser
+    hyperparams = Hyperparameters()
+
+    # Add all hyperparameters to the argument parser
+    for field_name, field_info in hyperparams.__dataclass_fields__.items():
+        field_type = field_info.type
+        default_value = getattr(hyperparams, field_name)
+
+        # Get descriptive help message from metadata
+        help_msg = field_info.metadata.get("help", f"Configure {field_name}")
+        help_text = f"{help_msg} (default: {default_value})"
+
+        # Handle different field types
+        if field_type == bool:
+            if default_value:
+                parser.add_argument(f"--{field_name}", action="store_true", default=default_value,
+                                  help=help_text)
+            else:
+                parser.add_argument(f"--{field_name}", action="store_true", default=default_value,
+                                  help=help_text)
+        elif field_type == str:
+            parser.add_argument(f"--{field_name}", type=str, default=default_value,
+                              help=help_text)
+        elif field_type == int:
+            parser.add_argument(f"--{field_name}", type=int, default=default_value,
+                              help=help_text)
+        elif field_type == float:
+            parser.add_argument(f"--{field_name}", type=float, default=default_value,
+                              help=help_text)
+        else:
+            # For other types, try to infer from default value
+            if isinstance(default_value, bool):
+                parser.add_argument(f"--{field_name}", action="store_true", default=default_value,
+                                  help=help_text)
+            elif isinstance(default_value, str):
+                parser.add_argument(f"--{field_name}", type=str, default=default_value,
+                                  help=help_text)
+            elif isinstance(default_value, int):
+                parser.add_argument(f"--{field_name}", type=int, default=default_value,
+                                  help=help_text)
+            elif isinstance(default_value, float):
+                parser.add_argument(f"--{field_name}", type=float, default=default_value,
+                                  help=help_text)
+
     args = parser.parse_args()
 
-    hyperparams = Hyperparameters()
-    if args.run_name:
-        hyperparams.run_name = args.run_name
+    # Update hyperparameters with parsed arguments
+    for field_name in hyperparams.__dataclass_fields__.keys():
+        if hasattr(args, field_name):
+            setattr(hyperparams, field_name, getattr(args, field_name))
 
     trainer = Trainer(hyperparams, args.model_name, args.config)
     trainer.train()
