@@ -69,7 +69,7 @@ LLaDa (dLLM) - [link](https://arxiv.org/abs/2502.09992) - val-loss: `8.6930`, xe
 Avey - [link](https://arxiv.org/pdf/2506.11305v1) - loss: `3.323`, peak memory: `51962 MiB` (batch size 8), step_time: `2871ms` (very slow to train and uses >3x more memory than other models)
 
 ## Byte-Level Models
-AUNet - [link](https://arxiv.org/abs/2506.14761) - loss: `tbd`,  peak memory: `tbd` (batch size 16), step_time: `tbd`
+AUNet - [link](https://arxiv.org/abs/2506.14761) - `val_loss:1.1502 train_time:7246104ms step_avg:1423.60ms`
 
 ## Optimizers
 PaLMForeachSOAP - [link](https://github.com/ClashLuke/HeavyBall) - almost 2 times slower than Adam but the best results
