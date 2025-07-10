@@ -92,3 +92,10 @@ def register_hierarchical():
     from aunet import HierarchicalConfig, HierarchicalTransformer
 
     return HierarchicalConfig, HierarchicalTransformer
+
+
+@register_model
+def register_lfm2():
+    from lfm2 import LFM2Config, LFM2
+
+    return LFM2Config, LFM2
