@@ -22,6 +22,12 @@ os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
 os.environ["NCCL_TIMEOUT"] = "1800"
 
 
+def print_rank0(*args, **kwargs):
+    """Print only on rank 0 (master process) in distributed training."""
+    if not dist.is_initialized() or dist.get_rank() == 0:
+        print(*args, **kwargs)
+
+
 @dataclass
 class Hyperparameters(Coqpit):
     """Training hyperparameters configuration."""
@@ -147,12 +153,12 @@ class DataShard:
             header = np.frombuffer(f.read(DataShard.HEADER_SIZE), dtype=np.int32)
 
         if header[0] != DataShard.MAGIC_NUMBER:
-            print("ERROR: magic number mismatch in the data .bin file!")
-            print("---> HINT: Are you passing in a correct file with --input_bin?")
-            print(
+            print_rank0("ERROR: magic number mismatch in the data .bin file!")
+            print_rank0("---> HINT: Are you passing in a correct file with --input_bin?")
+            print_rank0(
                 "---> HINT: Dataset encoding changed recently, re-run data prepro or refer again to README"
             )
-            print(
+            print_rank0(
                 "---> HINT: For example re-run: `python dev/data/tinyshakespeare.py`, then re-try"
             )
             exit(1)
@@ -185,9 +191,9 @@ class ByteDataShard:
             header = np.frombuffer(f.read(ByteDataShard.HEADER_SIZE), dtype=np.int32)
 
         if header[0] != ByteDataShard.MAGIC_NUMBER:
-            print("ERROR: magic number mismatch in the byte data .bin file!")
-            print("---> HINT: Are you passing in a correct byte-level data file?")
-            print("---> HINT: For byte-level training, use fineweb_bytes.py to generate data")
+            print_rank0("ERROR: magic number mismatch in the byte data .bin file!")
+            print_rank0("---> HINT: Are you passing in a correct byte-level data file?")
+            print_rank0("---> HINT: For byte-level training, use fineweb_bytes.py to generate data")
             exit(1)
         assert header[1] == ByteDataShard.VERSION, "Unsupported version"
         return header[2]
@@ -309,6 +315,8 @@ class Trainer:
         if self.is_master:
             self.setup_logging()
 
+
+
     def setup_distributed(self):
         """Initialize distributed training setup."""
         assert torch.cuda.is_available()
@@ -341,9 +349,9 @@ class Trainer:
 
         # Log overridden parameters (only on master process)
         if overridden_params and self.is_master:
-            print("Hyperparameters overridden by model config:")
+            print_rank0("Hyperparameters overridden by model config:")
             for key, old_val, new_val in overridden_params:
-                print(f"  {key}: {old_val} -> {new_val}")
+                print_rank0(f"  {key}: {old_val} -> {new_val}")
 
         # Validate vocab size for byte-level training
         if self.args.byte_level_training:
@@ -353,14 +361,14 @@ class Trainer:
                     f"Please update your model configuration for byte-level training."
                 )
             elif hasattr(self.model_config, 'vocab_size'):
-                print(f"✓ Vocab size validation passed: {self.model_config.vocab_size} (suitable for byte-level training)")
+                print_rank0(f"✓ Vocab size validation passed: {self.model_config.vocab_size} (suitable for byte-level training)")
 
         self.model = model_cls(self.model_config).cuda()
 
         if self.args.compile_model:
-            print("Compiling the model...")
+            print_rank0("Compiling the model...")
             self.model = torch.compile(self.model)
-            print("✓ Model compilation passed")
+            print_rank0("✓ Model compilation passed")
 
         self.model = DDP(
             self.model, device_ids=[self.local_rank], find_unused_parameters=True
@@ -402,7 +410,7 @@ class Trainer:
         """Initialize training and validation data loaders."""
         if self.args.byte_level_training:
             if self.is_master:
-                print("Setting up byte-level training data loaders...")
+                print_rank0("Setting up byte-level training data loaders...")
 
             # Try binary byte shards first, fallback to text shards
             train_pattern = os.path.join(self.args.byte_data_dir, "fineweb_train_*.bin")
@@ -419,22 +427,22 @@ class Trainer:
             # If validation files don't exist, use a subset of training files
             if not val_files:
                 if self.is_master:
-                    print(f"No validation files found at {val_pattern}")
-                    print("Using training files for validation...")
+                    print_rank0(f"No validation files found at {val_pattern}")
+                    print_rank0("Using training files for validation...")
                 val_pattern = train_pattern
 
             if self.is_master:
-                print(f"Using binary files for byte-level training")
-                print(f"Training files: {len(glob.glob(train_pattern))}")
-                print(f"Validation files: {len(glob.glob(val_pattern))}")
+                print_rank0(f"Using binary files for byte-level training")
+                print_rank0(f"Training files: {len(glob.glob(train_pattern))}")
+                print_rank0(f"Validation files: {len(glob.glob(val_pattern))}")
         else:
             train_pattern = self.args.input_bin
             val_pattern = self.args.input_val_bin
 
             if self.is_master:
-                print("Setting up BPE token-level training data loaders...")
-                print(f"Training pattern: {train_pattern}")
-                print(f"Validation pattern: {val_pattern}")
+                print_rank0("Setting up BPE token-level training data loaders...")
+                print_rank0(f"Training pattern: {train_pattern}")
+                print_rank0(f"Validation pattern: {val_pattern}")
 
         try:
             self.train_loader = DistributedDataLoader(
@@ -456,18 +464,18 @@ class Trainer:
             )
         except Exception as e:
             if self.is_master:
-                print(f"Error setting up data loaders: {e}")
-                print("\nTroubleshooting:")
+                print_rank0(f"Error setting up data loaders: {e}")
+                print_rank0("\nTroubleshooting:")
                 if self.args.byte_level_training:
-                    print("For byte-level training:")
-                    print(f"- Ensure byte data directory exists: {self.args.byte_data_dir}")
-                    print("- Run: cd ../data && python fineweb_bytes.py --version 10B")
-                    print("- Check that .bin files are present in the byte_data_dir")
+                    print_rank0("For byte-level training:")
+                    print_rank0(f"- Ensure byte data directory exists: {self.args.byte_data_dir}")
+                    print_rank0("- Run: cd ../data && python fineweb_bytes.py --version 10B")
+                    print_rank0("- Check that .bin files are present in the byte_data_dir")
                 else:
-                    print("For BPE token training:")
-                    print(f"- Check input_bin path: {self.args.input_bin}")
-                    print(f"- Check input_val_bin path: {self.args.input_val_bin}")
-                    print("- Run: cd ../data && python fineweb.py --version 10B")
+                    print_rank0("For BPE token training:")
+                    print_rank0(f"- Check input_bin path: {self.args.input_bin}")
+                    print_rank0(f"- Check input_val_bin path: {self.args.input_val_bin}")
+                    print_rank0("- Run: cd ../data && python fineweb.py --version 10B")
             raise
 
         self.train_accumulation_steps = self.args.batch_size // (
@@ -479,15 +487,15 @@ class Trainer:
         )
 
         if self.is_master:
-            print(f"Data loader setup complete:")
-            print(f"  Total training tokens: {self.train_loader.ntok_total:,}")
-            print(f"  Total validation tokens: {self.val_loader.ntok_total:,}")
-            print(f"  Training accumulation steps: {self.train_accumulation_steps}")
-            print(f"  Validation steps: {self.val_steps}")
+            print_rank0(f"Data loader setup complete:")
+            print_rank0(f"  Total training tokens: {self.train_loader.ntok_total:,}")
+            print_rank0(f"  Total validation tokens: {self.val_loader.ntok_total:,}")
+            print_rank0(f"  Training accumulation steps: {self.train_accumulation_steps}")
+            print_rank0(f"  Validation steps: {self.val_steps}")
             if self.args.byte_level_training:
-                print(f"  Vocabulary size: 256 (byte-level)")
+                print_rank0(f"  Vocabulary size: 256 (byte-level)")
             else:
-                print(f"  Vocabulary size: {getattr(self.model_config, 'vocab_size', 'Unknown')}")
+                print_rank0(f"  Vocabulary size: {getattr(self.model_config, 'vocab_size', 'Unknown')}")
 
     def setup_logging(self):
         """Initialize logging directory and files."""
@@ -509,16 +517,16 @@ class Trainer:
     def _log_initial_info(self):
         """Log initial information about the training run."""
 
-        print(
+        print_rank0(
             f"Running pytorch {torch.__version__} compiled for CUDA {torch.version.cuda}"
         )
 
-        print("=" * 100)
-        print(f"Byte-level training: {'Enabled' if self.args.byte_level_training else 'Disabled'}")
+        print_rank0("=" * 100)
+        print_rank0(f"Byte-level training: {'Enabled' if self.args.byte_level_training else 'Disabled'}")
         if self.args.byte_level_training:
-            print(f"Text data directory: {self.args.text_data_dir}")
-            print(f"Vocab size: 256 (bytes)")
-        print("=" * 100)
+            print_rank0(f"Text data directory: {self.args.text_data_dir}")
+            print_rank0(f"Vocab size: 256 (bytes)")
+        print_rank0("=" * 100)
 
     def validate(self) -> float:
         """Run validation loop and return validation loss."""
@@ -684,7 +692,7 @@ class Trainer:
         """Log validation results."""
         log_msg = f"step:{step}/{self.args.num_iterations} val_loss:{val_loss:.4f} "
         log_msg += f"train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/timed_steps:.2f}ms"
-        print(log_msg)
+        print_rank0(log_msg)
         with open(self.logfile, "a") as f:
             f.write(log_msg + "\n")
 
@@ -708,7 +716,7 @@ class Trainer:
 
         if metrics:
             log_msg += f" {metrics}"
-        print(log_msg)
+        print_rank0(log_msg)
 
 
 def main():
