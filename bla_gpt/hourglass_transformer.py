@@ -1,3 +1,8 @@
+"""
+TODO
+- Seems to have future leakage when using attention for upsampling
+"""
+
 import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -35,6 +40,7 @@ class HourglassConfig(Coqpit):
     use_qkv_bias: bool = True
     rmsnorm_before_qk: bool = True
     pos_encoding: bool = "rotary"
+    rope_theta: float = 10000.0
 
     # Vocabulary and sequence settings
     vocab_size: int = 50304
@@ -49,8 +55,8 @@ class HourglassConfig(Coqpit):
     upsampling_method: str = "attention"  # Options: "attention", "linear", "repeat"
 
     # Training settings (optional but useful to keep with model config)
-    learning_rate: float = 1e-4
-    weight_decay: float = 0.01
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.00
     warmup_steps: int = 10000
 
     def __post_init__(self):
@@ -139,9 +145,7 @@ class Upsampling(nn.Module):
         if self.method == "linear":
             self.proj = nn.Linear(config.n_embd, self.shorten_factor * config.n_embd)
         elif self.method == "attention":
-            self.linear_up = nn.Linear(
-                config.n_embd, self.shorten_factor * config.n_embd
-            )
+            self.proj = nn.Linear(config.n_embd, self.shorten_factor * config.n_embd)
             self.attn = Attention(config)
 
     def forward(
@@ -157,7 +161,7 @@ class Upsampling(nn.Module):
         elif self.method == "attention":
             assert orig_x is not None
 
-            x_up = self.linear_up(x)
+            x_up = self.proj(x)
             x_up = x_up.view(batch_size, seq_len * self.shorten_factor, n_embd)
             x_up = x_up + orig_x
             x_up = x_up + self.attn(x=x, q=x_up)
