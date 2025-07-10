@@ -155,7 +155,7 @@ class Attention(nn.Module):
         if self.flash and self.soft_cap == 0 and not self.use_softpick:
             y = self._flash_attention(q, k, v)
         else:
-            y = self._manual_attention(q, k, v, T)
+            y = self._manual_attention(q, k, v, T_q, T)
 
         # Project output
         return self._project_output(y, B, T_q, C)
@@ -220,9 +220,9 @@ class Attention(nn.Module):
             is_causal=self.causal if self.mask is None else False,
         )
 
-    def _manual_attention(self, q, k, v, T):
+    def _manual_attention(self, q, k, v, T_q, T):
         if self.causal and self.mask is None:
-            self.mask = torch.triu(torch.ones(T, T, dtype=torch.bool, device=q.device), diagonal=1)
+            self.mask = torch.triu(torch.ones(T_q, T, dtype=torch.bool, device=q.device), diagonal=1)
 
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         if self.soft_cap > 0:
