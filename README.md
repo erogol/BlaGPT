@@ -76,6 +76,9 @@ Hourglass Transformer (modified) - [link](https://arxiv.org/abs/2110.13711) - `v
 
 AUNet - [link](https://arxiv.org/abs/2506.14761) - `val_loss:1.1502 train_time:7246104ms step_avg:1423.60ms`
 
+SpaceByte - [link](https://arxiv.org/abs/2404.14408) - `TBD`
+
+
 ## Optimizers
 PaLMForeachSOAP - [link](https://github.com/ClashLuke/HeavyBall) - almost 2 times slower than Adam but the best results
 
