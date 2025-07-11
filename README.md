@@ -76,7 +76,7 @@ Hourglass Transformer (modified) - [link](https://arxiv.org/abs/2110.13711) - `v
 
 AUNet - [link](https://arxiv.org/abs/2506.14761) - `val_loss:1.1502 train_time:7246104ms step_avg:1423.60ms`
 
-SpaceByte - [link](https://arxiv.org/abs/2404.14408) - `TBD`
+SpaceByte - [link](https://arxiv.org/abs/2404.14408) - `val_loss:1.6755 train_time:2154923ms step_avg:423.36ms peak memory consumption: 27781 MiB`
 
 
 ## Optimizers
