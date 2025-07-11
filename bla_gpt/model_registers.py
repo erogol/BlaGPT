@@ -99,3 +99,10 @@ def register_lfm2():
     from lfm2 import LFM2Config, LFM2
 
     return LFM2Config, LFM2
+
+
+@register_model
+def register_spacebyte():
+    from spacebyte import SpaceByteConfig, SpaceByte
+
+    return SpaceByteConfig, SpaceByte
