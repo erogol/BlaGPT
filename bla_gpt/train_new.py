@@ -371,7 +371,7 @@ class Trainer:
             print_rank0("✓ Model compilation passed")
 
         self.model = DDP(
-            self.model, device_ids=[self.local_rank], find_unused_parameters=True
+            self.model, device_ids=[self.local_rank], find_unused_parameters=False
         )
         self.raw_model = self.model.module
         self.ctx = autocast(
@@ -514,12 +514,35 @@ class Trainer:
         sys.stdout = TeeLogger(self.logfile)
         self._log_initial_info()
 
+    def _format_number(self, num):
+        """Format a number in human-readable format (e.g., 1.2M, 345K, 1.5B)."""
+        if num >= 1e9:
+            return f"{num / 1e9:.1f}B"
+        elif num >= 1e6:
+            return f"{num / 1e6:.1f}M"
+        elif num >= 1e3:
+            return f"{num / 1e3:.1f}K"
+        else:
+            return str(num)
+
+    def _count_parameters(self):
+        """Count the total number of parameters in the model."""
+        total_params = sum(p.numel() for p in self.raw_model.parameters())
+        trainable_params = sum(p.numel() for p in self.raw_model.parameters() if p.requires_grad)
+        return total_params, trainable_params
+
     def _log_initial_info(self):
         """Log initial information about the training run."""
 
         print_rank0(
             f"Running pytorch {torch.__version__} compiled for CUDA {torch.version.cuda}"
         )
+
+        # Log model parameter count
+        total_params, trainable_params = self._count_parameters()
+        total_formatted = self._format_number(total_params)
+        trainable_formatted = self._format_number(trainable_params)
+        print_rank0(f"Model parameters: {total_formatted} total ({total_params:,}), {trainable_formatted} trainable ({trainable_params:,})")
 
         print_rank0("=" * 100)
         print_rank0(f"Byte-level training: {'Enabled' if self.args.byte_level_training else 'Disabled'}")
@@ -685,6 +708,12 @@ class Trainer:
                 self._log_training_progress(
                     step, train_loss, training_time_ms, t0, timed_steps, metrics
                 )
+
+        # Report peak memory usage
+        if self.is_master:
+            print_rank0(
+                f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB"
+            )
 
     def _log_validation_results(
         self, step: int, val_loss: float, training_time_ms: float, timed_steps: float
