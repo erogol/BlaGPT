@@ -78,6 +78,8 @@ AUNet - [link](https://arxiv.org/abs/2506.14761) - `val_loss:1.1502 train_time:7
 
 SpaceByte - [link](https://arxiv.org/abs/2404.14408) - `val_loss:1.6755 train_time:2154923ms step_avg:423.36ms peak memory consumption: 27781 MiB`
 
+HNet - [link](https://arxiv.org/pdf/2507.07955) - `val_loss:1.4554 train_time:2207809ms step_avg:433.75ms peak memory consumption: 23948 MiB`
+
 
 ## Optimizers
 PaLMForeachSOAP - [link](https://github.com/ClashLuke/HeavyBall) - almost 2 times slower than Adam but the best results
