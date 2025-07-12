@@ -106,3 +106,10 @@ def register_spacebyte():
     from spacebyte import SpaceByteConfig, SpaceByte
 
     return SpaceByteConfig, SpaceByte
+
+
+@register_model
+def register_hnet():
+    from hnet import HNetConfig, HNet
+
+    return HNetConfig, HNet
