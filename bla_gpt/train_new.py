@@ -16,6 +16,7 @@ from coqpit import Coqpit
 from torch.amp.autocast_mode import autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from utils import get_model
+from optimizers import get_optimizer
 
 # Set environment variables
 os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
@@ -115,6 +116,18 @@ class Hyperparameters(Coqpit):
     precision: str = field(
         default="bfloat16",
         metadata={"help": "Training precision (float32 or bfloat16)"}
+    )
+    optimizer_name: str = field(
+        default="Adam",
+        metadata={"help": "Optimizer name (Adam, AdamW, etc.)"}
+    )
+    optimizer_args: dict = field(
+        default_factory=lambda: {
+            "betas": (0.9, 0.95),
+            "eps": 1e-8,
+            "weight_decay": 0.0,
+        },
+        metadata={"help": "Optimizer arguments"}
     )
 
 
@@ -380,13 +393,11 @@ class Trainer:
 
     def setup_optimization(self):
         """Initialize optimizer and learning rate scheduler."""
-        self.optimizer = torch.optim.Adam(
-            self.raw_model.parameters(),
-            lr=self.args.learning_rate,
-            betas=(0.9, 0.95),
-            eps=1e-8,
-            weight_decay=self.args.weight_decay,
-            foreach=False,
+        self.optimizer = get_optimizer(
+            self.args.optimizer_name,
+            self.args.optimizer_args,
+            self.args.learning_rate,
+            self.raw_model
         )
 
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(
