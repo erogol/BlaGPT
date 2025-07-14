@@ -1,8 +1,3 @@
-"""
-TODO
-- Seems to have future leakage when using attention for upsampling
-"""
-
 import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -164,7 +159,16 @@ class Upsampling(nn.Module):
             x_up = self.proj(x)
             x_up = x_up.view(batch_size, seq_len * self.shorten_factor, n_embd)
             x_up = x_up + orig_x
-            x_up = x_up + self.attn(x=x, q=x_up)
+
+            upsampled_len = seq_len * self.shorten_factor
+            key_len = seq_len
+            query_positions = torch.arange(upsampled_len, device=x.device)
+            key_positions = torch.arange(key_len, device=x.device)
+            source_positions = query_positions // self.shorten_factor
+            causal_mask = key_positions.unsqueeze(0) <= source_positions.unsqueeze(1)
+            causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
+
+            x_up = x_up + self.attn(x=x, q=x_up, mask=causal_mask)
             return x_up
         else:
             raise ValueError(f"Unknown upsampling method: {self.method}")
@@ -243,8 +247,12 @@ class HourglassTransformer(nn.Module):
     def forward_recursive(
         self, layers: nn.ModuleList, x: torch.Tensor, mask: torch.Tensor, level: int = 0
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        if isinstance(layers, TransformerLayer):
-            return layers(x, mask), mask
+        if len(layers) > 0 and all(
+            isinstance(layer, TransformerLayer) for layer in layers
+        ):
+            for layer in layers:
+                x = layer(x, mask)
+            return x, mask
 
         orig_x = x
         orig_mask = mask
@@ -255,14 +263,16 @@ class HourglassTransformer(nn.Module):
 
         # Process transformer layers
         for layer in layers[1:-2]:
-            x = layer(x, mask)
+            if isinstance(layer, TransformerLayer):
+                x = layer(x, mask)
 
         # Process recursive layers
-        x, mask = self.forward_recursive(layers[-2], x, mask, level + 1)
+        if len(layers) > 2:
+            x, mask = self.forward_recursive(layers[-2], x, mask, level + 1)
 
         # Upsampling
         x = layers[-1](x, orig_x)
-        mask = orig_mask  # Restore original mask after upsampling
+        mask = orig_mask
 
         return x, mask
 
