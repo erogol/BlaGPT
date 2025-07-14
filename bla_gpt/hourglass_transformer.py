@@ -274,6 +274,10 @@ class HourglassTransformer(nn.Module):
         device = input_ids.device
         batch_size, seq_len = input_ids.shape
 
+        assert seq_len % self.config.shorten_factors[0] == 0, (
+            "Sequence length must be divisible by the first shortening factor."
+        )
+
         # Create causal mask
         causal_mask = torch.triu(
             torch.ones((seq_len, seq_len), device=device), diagonal=1
@@ -290,7 +294,7 @@ class HourglassTransformer(nn.Module):
             x = layer(x, causal_mask)
 
         # Store original sequence for residual connections
-        orig_x = x
+        orig_x = x.clone()
 
         # Process through hourglass structure
         x, _ = self.forward_recursive(self.hourglass_layers, x, causal_mask)
