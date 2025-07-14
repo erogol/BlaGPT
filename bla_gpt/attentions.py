@@ -24,6 +24,7 @@ except ModuleNotFoundError:
 # Attention Modules
 #
 
+
 def softpick(x, dim=-1, eps=1e-8):
     # from https://github.com/zaydzuhri/softpick-attention
     x_m = torch.max(x, dim=dim, keepdim=True).values
@@ -31,7 +32,9 @@ def softpick(x, dim=-1, eps=1e-8):
     x_e_1 = torch.exp(x - x_m) - x_m_e_m
     r_x_e_1 = F.relu(x_e_1)
     a_x_e_1 = torch.where(x.isfinite(), torch.abs(x_e_1), 0)
-    return r_x_e_1 / (torch.sum(a_x_e_1, dim=dim, keepdim=True) + eps) # epsilon is only useful if all inputs are EXACTLY 0. we might not even need it
+    return r_x_e_1 / (
+        torch.sum(a_x_e_1, dim=dim, keepdim=True) + eps
+    )  # epsilon is only useful if all inputs are EXACTLY 0. we might not even need it
 
 
 def soft_cap(x, cap):
@@ -78,7 +81,7 @@ class Attention(nn.Module):
         self.n_embd = config.n_embd
         self.head_dim = config.n_embd // config.n_head
         self.soft_cap = 50.0 if config.use_soft_logit_capping else 0.0
-        self.use_softpick =  config.use_softpick if "use_softpick" in config else False
+        self.use_softpick = config.use_softpick if "use_softpick" in config else False
         self.causal = True
 
         # RMSNorm before q and k projections
@@ -222,7 +225,9 @@ class Attention(nn.Module):
 
     def _manual_attention(self, q, k, v, T_q, T):
         if self.causal and self.mask is None:
-            self.mask = torch.triu(torch.ones(T_q, T, dtype=torch.bool, device=q.device), diagonal=1)
+            self.mask = torch.tril(
+                torch.ones(T, T, dtype=torch.bool, device=q.device)
+            ).view(1, 1, T, T)
 
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         if self.soft_cap > 0:
@@ -443,6 +448,7 @@ class MultiTokenAttention(Attention):
     2. Head mixing convolution: Shares information between attention heads
     3. Group normalization with depth scaling: Improves gradient flow
     """
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -453,15 +459,17 @@ class MultiTokenAttention(Attention):
 
         # Convolution kernel dimensions
         self.cq = getattr(config, "mta_query_kernel_size", 6)  # Query dimension
-        self.ck = getattr(config, "mta_key_kernel_size", 11)   # Key dimension
-        self.ch = getattr(config, "mta_head_kernel_size", 2)   # Head dimension
+        self.ck = getattr(config, "mta_key_kernel_size", 11)  # Key dimension
+        self.ch = getattr(config, "mta_head_kernel_size", 2)  # Head dimension
 
         # Whether to apply convolution pre or post softmax
         self.pre_softmax_key_query = getattr(config, "pre_softmax_key_query", True)
         self.pre_softmax_head = getattr(config, "pre_softmax_head", False)
 
         # Ensure head count is divisible by head kernel size
-        assert self.n_head % self.ch == 0, f"Head count {self.n_head} must be divisible by head kernel size {self.ch}"
+        assert self.n_head % self.ch == 0, (
+            f"Head count {self.n_head} must be divisible by head kernel size {self.ch}"
+        )
 
         # Initialize convolution kernels
         if self.use_key_query_conv:
@@ -470,15 +478,15 @@ class MultiTokenAttention(Attention):
                 in_channels=1,
                 out_channels=1,
                 kernel_size=(self.cq, self.ck),
-                padding=((self.cq-1)//2, (self.ck-1)//2),
+                padding=((self.cq - 1) // 2, (self.ck - 1) // 2),
                 bias=False,
-                groups=1
+                groups=1,
             )
 
             # Initialize identity kernel (only central value is 1.0)
             with torch.no_grad():
                 kernel = torch.zeros(1, 1, self.cq, self.ck)
-                kernel[0, 0, self.cq//2, self.ck//2] = 1.0
+                kernel[0, 0, self.cq // 2, self.ck // 2] = 1.0
                 self.key_query_conv.weight.copy_(kernel)
 
         if self.use_head_conv:
@@ -510,7 +518,9 @@ class MultiTokenAttention(Attention):
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
 
         # Create fresh causal mask every time, expanded for batch and head dimensions
-        causal_mask = torch.tril(torch.ones(T_q, T_k, device=q.device)).view(1, 1, T_q, T_k)
+        causal_mask = torch.tril(torch.ones(T_q, T_k, device=q.device)).view(
+            1, 1, T_q, T_k
+        )
 
         # Apply key-query convolution if enabled
         if self.use_key_query_conv and self.pre_softmax_key_query:
@@ -546,7 +556,9 @@ class MultiTokenAttention(Attention):
             mixed_att = torch.zeros_like(att)
             for g in range(self.head_groups):
                 # For each group, mix the heads using the kernel
-                mixed_att[:, g] = torch.einsum('bhtk,hj->bjtk', att[:, g], self.head_kernel[g])
+                mixed_att[:, g] = torch.einsum(
+                    "bhtk,hj->bjtk", att[:, g], self.head_kernel[g]
+                )
 
             att = mixed_att
             # Reshape back to original shape
@@ -593,7 +605,9 @@ class MultiTokenAttention(Attention):
             mixed_att = torch.zeros_like(att)
             for g in range(self.head_groups):
                 # For each group, mix the heads using the kernel
-                mixed_att[:, g] = torch.einsum('bhtk,hj->bjtk', att[:, g], self.head_kernel[g])
+                mixed_att[:, g] = torch.einsum(
+                    "bhtk,hj->bjtk", att[:, g], self.head_kernel[g]
+                )
 
             att = mixed_att
             # Reshape back to original shape
@@ -646,6 +660,7 @@ class MultiTokenAttention(Attention):
 
         # Use the fresh mask for this forward pass
         return super().forward(x, q, causal_mask)
+
 
 #
 # WIP Implementations
@@ -733,9 +748,9 @@ class DilatedAttention(Attention):  # TOOO SLOW !!
             dilation_rates: List of dilation rates corresponding to each segment size
         """
         super().__init__(config)
-        assert len(config.segment_sizes) == len(
-            config.dilation_rates
-        ), "Must provide same number of segment sizes and dilation rates"
+        assert len(config.segment_sizes) == len(config.dilation_rates), (
+            "Must provide same number of segment sizes and dilation rates"
+        )
 
         self.segment_sizes = config.segment_sizes
         self.dilation_rates = config.dilation_rates
@@ -988,7 +1003,9 @@ class MultiheadDiffAttn(nn.Module):  # OOM
         self.subln = RMSNorm(2 * self.head_dim, eps=1e-5)
         self.rotary = Rotary(self.head_dim)
 
-        assert flash_attn_func, "FlashAttention is not available. Please install it to use this module."
+        assert flash_attn_func, (
+            "FlashAttention is not available. Please install it to use this module."
+        )
 
     def forward(
         self,
@@ -1025,8 +1042,12 @@ class MultiheadDiffAttn(nn.Module):  # OOM
         attn22 = flash_attn_func(q2, k2, v2, causal=True)
         attn2 = torch.cat([attn21, attn22], dim=-1)
 
-        lambda_1 = torch.exp(torch.sum(self.lambda_q1 * self.lambda_k1, dim=-1).float()).type_as(q)
-        lambda_2 = torch.exp(torch.sum(self.lambda_q2 * self.lambda_k2, dim=-1).float()).type_as(q)
+        lambda_1 = torch.exp(
+            torch.sum(self.lambda_q1 * self.lambda_k1, dim=-1).float()
+        ).type_as(q)
+        lambda_2 = torch.exp(
+            torch.sum(self.lambda_q2 * self.lambda_k2, dim=-1).float()
+        ).type_as(q)
         lambda_full = lambda_1 - lambda_2 + self.lambda_init
         attn = attn1 - lambda_full * attn2
 
@@ -1039,7 +1060,6 @@ class MultiheadDiffAttn(nn.Module):  # OOM
 
 
 if __name__ == "__main__":
-
     #
     # Testing - Forgetting Transformer Attention
     #
@@ -1095,27 +1115,26 @@ if __name__ == "__main__":
 
     # Create a test configuration
     config = SimpleNamespace(
-        n_embd=384,              # Embedding dimension
-        n_head=12,               # Number of attention heads
-        n_kv_head=12,            # Number of key-value heads (same as n_head for standard attention)
-        block_size=1024,         # Maximum sequence length
-        dropout=0.1,             # Dropout rate
-        bias=False,              # Whether to include bias in linear projections
-        use_qkv_bias=False,      # Whether to include bias in QKV projections
-        pos_encoding="rotary",   # Position encoding type
-        rope_theta=10000,        # RoPE base
-        rmsnorm_before_qk=False, # Whether to apply RMSNorm before QK projections
-        use_soft_logit_capping=False, # Soft logit capping setting
-
+        n_embd=384,  # Embedding dimension
+        n_head=12,  # Number of attention heads
+        n_kv_head=12,  # Number of key-value heads (same as n_head for standard attention)
+        block_size=1024,  # Maximum sequence length
+        dropout=0.1,  # Dropout rate
+        bias=False,  # Whether to include bias in linear projections
+        use_qkv_bias=False,  # Whether to include bias in QKV projections
+        pos_encoding="rotary",  # Position encoding type
+        rope_theta=10000,  # RoPE base
+        rmsnorm_before_qk=False,  # Whether to apply RMSNorm before QK projections
+        use_soft_logit_capping=False,  # Soft logit capping setting
         # MTA specific parameters
-        use_key_query_conv=True,     # Whether to use key-query convolution
-        use_head_conv=True,          # Whether to use head convolution
-        use_group_norm=True,         # Whether to use group normalization
-        mta_query_kernel_size=6,     # Query dimension for convolution kernel
-        mta_key_kernel_size=11,      # Key dimension for convolution kernel
-        mta_head_kernel_size=2,      # Head dimension for convolution kernel
+        use_key_query_conv=True,  # Whether to use key-query convolution
+        use_head_conv=True,  # Whether to use head convolution
+        use_group_norm=True,  # Whether to use group normalization
+        mta_query_kernel_size=6,  # Query dimension for convolution kernel
+        mta_key_kernel_size=11,  # Key dimension for convolution kernel
+        mta_head_kernel_size=2,  # Head dimension for convolution kernel
         pre_softmax_key_query=True,  # Whether to apply key-query convolution before softmax
-        pre_softmax_head=False       # Whether to apply head convolution before softmax
+        pre_softmax_head=False,  # Whether to apply head convolution before softmax
     )
 
     # Create a dummy Rotary class for testing (since it's used in parent class)
@@ -1131,7 +1150,9 @@ if __name__ == "__main__":
             self.register_buffer("sin", freqs.sin().float())
 
         def forward(self, x):
-            return self.cos[None, : x.size(-3), None, :], self.sin[None, : x.size(-3), None, :]
+            return self.cos[None, : x.size(-3), None, :], self.sin[
+                None, : x.size(-3), None, :
+            ]
 
     # Create a mock apply_rotary_emb function
     def mock_apply_rotary_emb(x, cos, sin):
@@ -1163,14 +1184,32 @@ if __name__ == "__main__":
 
         # Verify output
         print(f"Output shape: {output.shape}")
-        assert output.shape == (batch_size, seq_len, config.n_embd), "Output shape doesn't match input shape"
+        assert output.shape == (batch_size, seq_len, config.n_embd), (
+            "Output shape doesn't match input shape"
+        )
 
         # Test with different key-query and head convolution settings
         test_configs = [
-            {"pre_softmax_key_query": True, "pre_softmax_head": False, "label": "Pre-softmax key-query, Post-softmax head (paper's best)"},
-            {"pre_softmax_key_query": False, "pre_softmax_head": False, "label": "Post-softmax key-query, Post-softmax head"},
-            {"pre_softmax_key_query": True, "pre_softmax_head": True, "label": "Pre-softmax key-query, Pre-softmax head"},
-            {"pre_softmax_key_query": False, "pre_softmax_head": True, "label": "Post-softmax key-query, Pre-softmax head"}
+            {
+                "pre_softmax_key_query": True,
+                "pre_softmax_head": False,
+                "label": "Pre-softmax key-query, Post-softmax head (paper's best)",
+            },
+            {
+                "pre_softmax_key_query": False,
+                "pre_softmax_head": False,
+                "label": "Post-softmax key-query, Post-softmax head",
+            },
+            {
+                "pre_softmax_key_query": True,
+                "pre_softmax_head": True,
+                "label": "Pre-softmax key-query, Pre-softmax head",
+            },
+            {
+                "pre_softmax_key_query": False,
+                "pre_softmax_head": True,
+                "label": "Post-softmax key-query, Pre-softmax head",
+            },
         ]
 
         print("\nTesting different convolution configurations:")
