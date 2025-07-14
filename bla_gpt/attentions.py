@@ -233,7 +233,7 @@ class Attention(nn.Module):
         if self.soft_cap > 0:
             att = soft_cap(att, self.soft_cap)
 
-        att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+        att = att.masked_fill(self.mask[:, :, :T_q, :T] == 0, float("-inf"))
         if self.use_softpick:
             att = softpick(att, dim=-1)
         else:
