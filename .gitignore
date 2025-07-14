@@ -165,3 +165,5 @@ cython_debug/
 logs/*
 bla_gpt/logs/*
 data/fineweb10B
+data/fineweb10B_bytes
+data/fineweb10B_text
