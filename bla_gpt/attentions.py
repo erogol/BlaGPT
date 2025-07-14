@@ -226,8 +226,8 @@ class Attention(nn.Module):
     def _manual_attention(self, q, k, v, T_q, T):
         if self.causal and self.mask is None:
             self.mask = torch.tril(
-                torch.ones(T, T, dtype=torch.bool, device=q.device)
-            ).view(1, 1, T, T)
+                torch.ones(T_q, T, dtype=torch.bool, device=q.device)
+            ).view(1, 1, T_q, T)
 
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         if self.soft_cap > 0:
@@ -258,6 +258,7 @@ class MultiHeadLatentAttention(Attention):
         super().__init__(config)
 
     def set_layers(self, config):
+        # Projections for query, key, and value
         self.q_proj = nn.Linear(
             config.n_embd, config.n_embd, bias=config.bias or config.use_qkv_bias
         )
