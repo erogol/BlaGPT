@@ -47,6 +47,10 @@ Parallel Transformer Block - [link](https://arxiv.org/abs/2204.02311) - loss: `3
 
 Per Layer Token Embedding - [link](https://blog.google/technology/developers/gemma-3/) - loss: `3.2411` - peak memory: `40916 MiB`
 
+PolyNorm - [link](https://arxiv.org/html/2411.03884v1) - best_model_loss: `3.2411` -> loss: `3.3017` - peak memory: `40895 MiB`
+
+PolyReLU - [link](https://arxiv.org/html/2411.03884v1) - best_model_loss: `3.2411` -> loss: `3.2642` - peak memory: `40890 MiB`
+
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
 
