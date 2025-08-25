@@ -25,7 +25,7 @@ from attentions import (
     soft_cap,
 )
 from coqpit import Coqpit
-from mlps import MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, Primer_MLP, SwiGLU_MLP
+from mlps import MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, Primer_MLP, SwiGLU_MLP, PolyReLU_MLP, PolyNorm_MLP
 from modules.canon_layer import CanonLayer
 from modules.pattention import Pattention
 from norms import DyTNorm, LayerNorm, RMSNorm
@@ -58,7 +58,8 @@ class GPTConfig(Coqpit):
     # Transformer parameters
     norm_layer: str = "rmsnorm"  # type of normalization layer to use
     attention: str = "regular"  # attention type in `get_attention()`
-    activation: str = "swiglu"  # activation type in `get_mlp()`
+    activation: str = "polynorm"  # activation type in `get_mlp()`
+    polycom_order: int = 3  # order of polynomial for PolyCom activations (polyrelu/polynorm)
     use_soft_logit_capping: bool = False
     n_kv_head: int = 4  # Number of heads for the key and value (Grouped Query Attention), if n_kv_head == n_head, it is full attention
     tie_embed_weights: bool = True
@@ -272,6 +273,10 @@ def get_mlp(config):
         return Negout_MLP(config)
     elif config.activation == "maxout":
         return Maxout_MLP(config)
+    elif config.activation == "polyrelu":
+        return PolyReLU_MLP(config)
+    elif config.activation == "polynorm":
+        return PolyNorm_MLP(config)
     elif config.activation == "pattention":
         return Pattention(config)
     raise ValueError(f"Unrecognized activation type {config.activation}")
