@@ -171,3 +171,103 @@ class Maxout_MLP(nn.Module):
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
+
+
+class PolyReLU(nn.Module):
+    """PolyReLU activation function: Σᵢ aᵢ ReLU^i(x)
+    
+    Type I PolyCom where the function is applied first, then raised to powers:
+    PolyReLU(x) = a₁*ReLU(x) + a₂*ReLU²(x) + a₃*ReLU³(x) + ...
+    """
+    def __init__(self, order=3):
+        super().__init__()
+        self.order = order
+        # Initialize coefficients: aᵢ = 1/order for i=1,2,...,order and a₀ = 0
+        coeffs = torch.zeros(order + 1)
+        coeffs[1:] = 1.0 / order  # a₁, a₂, ..., a_order = 1/order
+        coeffs[0] = 0.0  # a₀ = 0
+        self.coefficients = nn.Parameter(coeffs)
+    
+    def forward(self, x):
+        # Start with zero (a₀ term is always 0 but kept for completeness)
+        result = self.coefficients[0] * torch.zeros_like(x)
+        
+        # Compute ReLU(x) once and reuse
+        relu_x = F.relu(x)
+        
+        # Add terms: a₁*ReLU(x) + a₂*ReLU²(x) + ...
+        power = relu_x
+        for i in range(1, self.order + 1):
+            result = result + self.coefficients[i] * power
+            if i < self.order:  # Don't compute unnecessary power for last iteration
+                power = power * relu_x
+                
+        return result
+
+
+class PolyNorm(nn.Module):
+    """PolyNorm activation function: Σᵢ aᵢ * xᵢ / ||xᵢ||₂
+    
+    Type II PolyCom where input is raised to powers first, then normalized:
+    PolyNorm(x) = a₁*x¹/||x¹||₂ + a₂*x²/||x²||₂ + a₃*x³/||x³||₂ + ...
+    """
+    def __init__(self, order=3):
+        super().__init__()
+        self.order = order
+        # Initialize coefficients: aᵢ = 1/order for i=1,2,...,order and a₀ = 0
+        coeffs = torch.zeros(order + 1)
+        coeffs[1:] = 1.0 / order  # a₁, a₂, ..., a_order = 1/order
+        coeffs[0] = 0.0  # a₀ = 0
+        self.coefficients = nn.Parameter(coeffs)
+        self.eps = 1e-8  # Small epsilon to avoid division by zero
+    
+    def forward(self, x):
+        # Start with zero (a₀ term is always 0 but kept for completeness)
+        result = self.coefficients[0] * torch.zeros_like(x)
+        
+        # Add terms: a₁*x/||x||₂ + a₂*x²/||x²||₂ + ...
+        power = x
+        for i in range(1, self.order + 1):
+            # Compute L2 norm along the last dimension and add epsilon for stability
+            norm = torch.norm(power, p=2, dim=-1, keepdim=True) + self.eps
+            normalized_power = power / norm
+            result = result + self.coefficients[i] * normalized_power
+            
+            if i < self.order:  # Don't compute unnecessary power for last iteration
+                power = power * x
+                
+        return result
+
+
+class PolyReLU_MLP(nn.Module):
+    """MLP using PolyReLU activation function"""
+    def __init__(self, config):
+        super().__init__()
+        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        self.polyrelu = PolyReLU(order=getattr(config, 'polycom_order', 3))
+        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x):
+        x = self.c_fc(x)
+        x = self.polyrelu(x)
+        x = self.c_proj(x)
+        x = self.dropout(x)
+        return x
+
+
+class PolyNorm_MLP(nn.Module):
+    """MLP using PolyNorm activation function"""
+    def __init__(self, config):
+        super().__init__()
+        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        self.polynorm = PolyNorm(order=getattr(config, 'polycom_order', 3))
+        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x):
+        x = self.c_fc(x)
+        x = self.polynorm(x)
+        x = self.c_proj(x)
+        x = self.dropout(x)
+        return x
