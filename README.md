@@ -37,7 +37,7 @@ Forgetting Transformer (Vanilla and Pro vers) - [link](https://openreview.net/pd
 
 Multi-Token Attention - [link](https://arxiv.org/pdf/2504.00927) - loss: `3.3357` - peak memory: `42136 MiB`
 
-Differential Attention - [link](https://arxiv.org/abs/2410.05258) - loss: `3.3352` - peak memory: `41521 MiB`
+Differential Attention - [link](https://arxiv.org/abs/2410.05258) - best_model_loss: `3.2411` -> loss: `3.2460` - peak memory: `41521 MiB`
 
 Softpick - [link](https://arxiv.org/abs/2504.20966) - loss: `3.3446` - peak memory: `59417 MiB`
 
