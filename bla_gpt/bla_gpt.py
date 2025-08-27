@@ -13,19 +13,13 @@ from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
-from attentions import (
-    Attention,
-    DilatedAttention,
-    ForgettingAttention,
-    KVShiftingAttention,
-    MultiheadDiffAttn,
-    MultiHeadLatentAttention,
-    MultiTokenAttention,
-    PattentionSelfAttention,
-    soft_cap,
-)
+from attentions import (Attention, DilatedAttention, ForgettingAttention,
+                        KVShiftingAttention, MultiheadDiffAttn,
+                        MultiHeadLatentAttention, MultiTokenAttention,
+                        PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
-from mlps import MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, Primer_MLP, SwiGLU_MLP, PolyReLU_MLP, PolyNorm_MLP
+from mlps import (MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, PolyNorm_MLP,
+                  PolyReLU_MLP, Primer_MLP, SwiGLU_MLP)
 from modules.canon_layer import CanonLayer
 from modules.pattention import Pattention
 from norms import DyTNorm, LayerNorm, RMSNorm
