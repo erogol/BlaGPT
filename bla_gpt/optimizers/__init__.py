@@ -80,9 +80,8 @@ def get_optimizer(
         adamw_params = [
             p
             for name, p in model.named_parameters()
-            if not (
-                p.ndim >= 2 and "embed_tokens" not in name and "lm_head" not in name
-            )
+            if p.ndim < 2 or "embed_tokens" in name or "lm_head"  in name
+
         ]
         return optimizer(
             lr=lr,
@@ -90,6 +89,30 @@ def get_optimizer(
             adamw_params=adamw_params,
             **optimizer_params
         )
+    elif optimizer_name.lower() == "adamuon":
+        module = importlib.import_module("optimizers.adamuon")
+        optimizer = getattr(module, "AdaMuon")
+        hidden_weights = [p for p in model.parameters() if p.ndim >= 2]
+        hidden_gains_biases = [p for p in model.parameters() if p.ndim < 2]
+        non_hidden_params = [
+            p
+            for name, p in model.named_parameters()
+            if  "embed_tokens" in name and "lm_head"  in name
+        ]
+
+        param_groups = [
+            dict(params=hidden_weights, lr=0.02, weight_decay=0.01, use_muon=True),
+            dict(
+                params=hidden_gains_biases + non_hidden_params,
+                lr=3e-4,
+                betas=(0.9, 0.95),
+                weight_decay=0.01,
+                use_muon=False,
+            ),
+        ]
+
+        return optimizer(param_groups, lr=lr, **optimizer_params)
+
     elif optimizer_name.lower() == "biclip":
         from optimizers.bliclip import BiClipSGD_Full
         return BiClipSGD_Full(parameters, lr=lr, **optimizer_params)
