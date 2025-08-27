@@ -2,6 +2,12 @@
 
 Experimental playground for benchmarking language model (LM) architectures, layers, and tricks on smaller datasets. Designed for flexible experimentation and exploration.
 
+## 📚 Technique Documentation
+
+For detailed explanations of the advanced techniques used in BlaGPT, see the [**techniques/**](./techniques/) directory. Each technique includes motivation, implementation details, and performance analysis.
+
+**Featured**: [AdaMuon Optimizer](./techniques/adamuon.md) - Our enhanced adaptive optimizer that combines Muon's geometric properties with Adam-style variance scaling.
+
 ## BlaGPT Model
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
 
@@ -107,6 +113,8 @@ Adam-Mini - [link]() - loss is higher than Adam and AdamW and also slower ??, sa
 MARS - [link](https://github.com/AGI-Arena/MARS) - loss: `3.3459`, peak VRAM: 40953 MiB, step_time: `628ms`
 
 Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak VRAM: `40332MB`, step_time: `620.24ms`
+
+AdaMuon - [link](https://arxiv.org/abs/2507.11005) - Adaptive Muon with second-moment estimation (default optimizer) - **See [detailed explanation](./techniques/adamuon.md)**
 
 BiClip - [link](https://arxiv.org/pdf/2502.04164) - (not working well) loss: `7.2292`, peak VRAM: `39751 MiB`, step_time: `510ms`
 
