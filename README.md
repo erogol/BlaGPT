@@ -57,6 +57,9 @@ PolyNorm - [link](https://arxiv.org/html/2411.03884v1) - best_model_loss: `3.241
 
 PolyReLU - [link](https://arxiv.org/html/2411.03884v1) - best_model_loss: `3.2411` -> loss: `3.2642` - peak memory: `40890 MiB`
 
+TOP loss - [link](https://erogol.notion.site/Predicting-the-Order-of-Upcoming-Tokens-Improves-Language-Modeling-25c7621486338183a12ec3621ee8a6b5?source=copy_link) - best_model_loss: `3.2411` -> loss: `3.2636` - peak memory: `47816 MiB`
+
+
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
 
