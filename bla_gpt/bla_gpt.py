@@ -18,6 +18,7 @@ from attentions import (Attention, DilatedAttention, ForgettingAttention,
                         MultiHeadLatentAttention, MultiTokenAttention,
                         PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
+from losses import compute_top_loss, compute_z_loss
 from mlps import (MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, PolyNorm_MLP,
                   PolyReLU_MLP, Primer_MLP, SwiGLU_MLP)
 from modules.canon_layer import CanonLayer
@@ -48,6 +49,12 @@ class GPTConfig(Coqpit):
     share_prediction_heads: bool = (
         False  # Whether to share parameters between prediction heads
     )
+
+    # Token Order Prediction (TOP) parameters
+    use_top: bool = False  # Whether to use Token Order Prediction auxiliary loss
+    top_window_size: int = 1024  # Window size for TOP target construction (should be <= block_size)
+    top_loss_weight: float = 1.0  # Weight for TOP loss in combined loss
+    top_force_optimized: bool = True  # Force optimized Triton implementation, fail if not available
 
     # Transformer parameters
     norm_layer: str = "rmsnorm"  # type of normalization layer to use
@@ -162,6 +169,12 @@ class GPTConfig(Coqpit):
                     group_id = min(group_id, self.weight_sharing_groups - 1)
                     self.weight_sharing_pattern.append(group_id)
 
+        # Validate TOP configuration
+        if self.use_top and self.top_window_size > self.block_size:
+            raise ValueError(
+                f"TOP window size ({self.top_window_size}) cannot be larger than block size ({self.block_size})"
+            )
+
 
 @dataclass
 class TokenformerConfig(GPTConfig):
@@ -195,28 +208,6 @@ class TokenformerConfig(GPTConfig):
 
     # pattention parameters
     param_token_num: int = 4096
-
-
-def compute_z_loss(logits, dim=-1, eps=1e-20):
-    """
-    Compute z-loss regularization to prevent model from being too confident.
-
-    Args:
-        logits: Raw logits from model of shape [batch, seq_len, vocab_size]
-        dim: Dimension along which to compute z-loss (usually vocab dimension)
-        eps: Small constant for numerical stability
-
-    Returns:
-        z_loss: Scalar z-loss term to add to training loss
-    """
-    # Get log of the partition function (logsumexp)
-    log_z = torch.logsumexp(logits, dim=dim, keepdim=True)
-
-    # Compute mean of log_z squared
-    z_loss = torch.square(torch.max(log_z, torch.zeros_like(log_z)))
-    z_loss = torch.mean(z_loss)
-
-    return z_loss
 
 
 #
@@ -510,6 +501,10 @@ class GPT(nn.Module):
                 [MultiTokenPredictionHead(config, i) for i in range(config.n_predict)]
             )
 
+        # Token Order Prediction head
+        if config.use_top:
+            self.top_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
@@ -636,20 +631,31 @@ class GPT(nn.Module):
                 logits = logits.float()
                 if self.soft_cap > 0.0:
                     logits = soft_cap(logits, self.soft_cap)
-                loss = F.cross_entropy(
+                ntp_loss = F.cross_entropy(
                     logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
                 )
 
+                # Initialize total loss with NTP loss
+                total_loss = ntp_loss
+                loss_dict = {"ntp_loss": ntp_loss.detach().item()}
+
+                # Add TOP loss if enabled
+                top_loss = compute_top_loss(self, x, idx, targets)
+                if top_loss is not None:
+                    total_loss += self.config.top_loss_weight * top_loss
+                    loss_dict["top_loss"] = top_loss.detach().item()
+
                 if self.config.z_loss_weight > 0.0:
                     z_loss = compute_z_loss(logits)
-                    loss += self.config.z_loss_weight * z_loss
+                    total_loss += self.config.z_loss_weight * z_loss
+                    loss_dict["z_loss"] = z_loss.detach().item()
 
-                    # we need to see lm_loss and z_loss separately for logging
-                    loss = {
-                        "total": loss,
-                        "z_loss": z_loss.detach().item(),
-                        "lm_loss": loss.detach().item(),
-                    }
+                # Return loss dictionary or scalar for backward compatibility
+                if len(loss_dict) > 1:
+                    loss_dict["total"] = total_loss
+                    loss = loss_dict
+                else:
+                    loss = total_loss
             else:
                 # multi-token prediction heads
                 total_loss = 0

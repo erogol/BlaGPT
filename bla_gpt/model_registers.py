@@ -96,20 +96,20 @@ def register_hierarchical():
 
 @register_model
 def register_lfm2():
-    from lfm2 import LFM2Config, LFM2
+    from lfm2 import LFM2, LFM2Config
 
     return LFM2Config, LFM2
 
 
 @register_model
 def register_spacebyte():
-    from spacebyte import SpaceByteConfig, SpaceByte
+    from spacebyte import SpaceByte, SpaceByteConfig
 
     return SpaceByteConfig, SpaceByte
 
 
 @register_model
 def register_hnet():
-    from hnet import HNetConfig, HNet
+    from hnet import HNet, HNetConfig
 
     return HNetConfig, HNet
