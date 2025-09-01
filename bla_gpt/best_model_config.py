@@ -71,6 +71,11 @@ class BestConfig(GPTConfig):
     )
     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
 
+    # Using TOP loss
+    use_top: bool = False
+    top_window_size: int = 1024  # Window size for TOP target construction (should be <= block_size)
+    top_loss_weight: float = 1.0
+
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
     dilation_rates: list[int] = field(default_factory=lambda: [1, 2, 4, 6, 12])
