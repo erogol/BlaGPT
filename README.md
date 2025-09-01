@@ -4,9 +4,9 @@ Experimental playground for benchmarking language model (LM) architectures, laye
 
 ## 📚 Technique Documentation
 
-For detailed explanations of the advanced techniques used in BlaGPT, see the [**techniques/**](./techniques/) directory. Each technique includes motivation, implementation details, and performance analysis.
+See the [**techniques/**](./techniques/) directory for explanations of various techniques implemented in this repository.
 
-**Featured**: [AdaMuon Optimizer](./techniques/adamuon.md) - Our enhanced adaptive optimizer that combines Muon's geometric properties with Adam-style variance scaling.
+**Latest**: [TOP loss](./techniques/top.md) - Predicting the oder of upcoming tokens
 
 ## BlaGPT Model
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
