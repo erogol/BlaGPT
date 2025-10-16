@@ -112,6 +112,25 @@ def get_optimizer(
         ]
 
         return optimizer(param_groups, lr=lr, **optimizer_params)
+    elif optimizer_name.lower() == "normuon":
+        module = importlib.import_module("optimizers.normuon")
+        optimizer = getattr(module, "HybridNorMuon")
+        normuon_params = [
+            p
+            for name, p in model.named_parameters()
+            if p.ndim >= 2 and "embed_tokens" not in name and "lm_head" not in name
+        ]
+        adamw_params = [
+            p
+            for name, p in model.named_parameters()
+            if p.ndim < 2 or "embed_tokens" in name or "lm_head" in name
+        ]
+        return optimizer(
+            lr=lr,
+            normuon_params=normuon_params,
+            adamw_params=adamw_params,
+            **optimizer_params
+        )
 
     elif optimizer_name.lower() == "biclip":
         from optimizers.bliclip import BiClipSGD_Full
