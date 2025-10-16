@@ -6,7 +6,7 @@ Experimental playground for benchmarking language model (LM) architectures, laye
 
 See the [**techniques/**](./techniques/) directory for explanations of various techniques implemented in this repository.
 
-**Latest**: [TOP loss](./techniques/top.md) - Predicting the oder of upcoming tokens
+**Latest**: [NorMuon optimizer](./techniques/normuon.md) - Predicting the oder of upcoming tokens
 
 ## BlaGPT Model
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
