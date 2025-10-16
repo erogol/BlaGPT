@@ -11,6 +11,8 @@ See the [**techniques/**](./techniques/) directory for explanations of various t
 ## BlaGPT Model
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
 
+Results below are the numbers after an epoch of training with fineweb10B, mostly using the default parameters. My goal is to see how things work without fiddling with the model and hyperparameters a lot.
+
 Multi-token prediction - [link](https://arxiv.org/pdf/2404.19737)
 
 Weight tying - [link](https://arxiv.org/abs/1608.05859v3)
@@ -120,6 +122,9 @@ Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak
 AdaMuon - [link](https://arxiv.org/abs/2507.11005) - Adaptive Muon with second-moment estimation (default optimizer) - **See [detailed explanation](./techniques/adamuon.md)**
 
 BiClip - [link](https://arxiv.org/pdf/2502.04164) - (not working well) loss: `7.2292`, peak VRAM: `39751 MiB`, step_time: `510ms`
+
+NorMuon - [link](https://arxiv.org/html/2510.05491v1) - best_model_loss: `3.2411` -> loss: `3.4630`, peak VRAM: `44154 MiB`, step_time: `387.46 ms`  - **See [detailed explanation](./techniques/normuon.md)**
+
 
 ## Adding a New Model
 

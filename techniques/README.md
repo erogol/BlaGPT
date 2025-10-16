@@ -7,3 +7,4 @@ This directory tries to explain various techniques implemented in this repositor
 
 ## Optimizers
 - [**AdaMuon**](./adamuon.md) - Adaptive Muon optimizer with second-moment estimation
+- [**NorMuon**](./normuon.md) - Normalized Muon optimizer with norm-preserving adaptive scaling
