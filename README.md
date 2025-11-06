@@ -6,7 +6,7 @@ Experimental playground for benchmarking language model (LM) architectures, laye
 
 See the [**techniques/**](./techniques/) directory for explanations of various techniques implemented in this repository.
 
-**Latest**: [NorMuon optimizer](./techniques/normuon.md) - Predicting the oder of upcoming tokens
+**Latest**: [KDA from Kimi-Linear](./techniques/kda.md) - Linear attention alternative
 
 ## BlaGPT Model
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
@@ -84,6 +84,8 @@ LLaDa (dLLM) - [link](https://arxiv.org/abs/2502.09992) - val-loss: `8.6930`, xe
 Avey - [link](https://arxiv.org/pdf/2506.11305v1) - loss: `3.323`, peak memory: `51962 MiB` (batch size 8), step_time: `2871ms` (very slow to train and uses >3x more memory than other models)
 
 LFM2 - [link](https://huggingface.co/LiquidAI/LFM2-1.2B) - TBD
+
+Kimi Delta Attention (1:3 interleaved Full Attention) - [link](https://arxiv.org/abs/2510.26692) - best_model_loss: `3.2411` -> loss: `3.2532`, peak_memory:`47391`,  step_time: `568.1ms`
 
 
 ## Byte-Level Models

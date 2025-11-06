@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 from attentions import (Attention, DilatedAttention, ForgettingAttention,
-                        KVShiftingAttention, MultiheadDiffAttn,
+                        KDAAttention, KVShiftingAttention, MultiheadDiffAttn,
                         MultiHeadLatentAttention, MultiTokenAttention,
                         PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
@@ -105,6 +105,16 @@ class GPTConfig(Coqpit):
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
     dilation_rates: list[int] = field(default_factory=lambda: [1, 2, 4, 6, 12])
 
+    # KDA (Kimi Delta Attention) parameters
+    kda_chunk_size: int = 64  # Chunk size for KDA chunkwise computation
+    kda_use_short_conv: bool = True  # Whether to use short convolutions in KDA
+    kda_decay_rank: int = None  # Rank for low-rank decay projection (defaults to head_dim)
+
+    # KDA interleaving parameters (like Kimi-Linear's 3:1 KDA-to-full-attention ratio)
+    use_kda_interleaving: bool = False  # Enable KDA/full attention interleaving
+    kda_interleave_with: str = "regular"  # Attention type for non-KDA layers ("regular", "latent", etc.)
+    kda_interleave_ratio: int = 4  # Use full attention every N layers (4 = 3:1 ratio like Kimi-Linear)
+
     # Weight sharing parameters
     enable_weight_sharing: bool = False  # Whether to enable weight sharing between layers
     weight_sharing_pattern: list[int] = field(default_factory=lambda: [])  # Pattern for weight sharing: [0, 0, 1, 1] means layers 0&1 share weights, layers 2&3 share weights
@@ -132,6 +142,15 @@ class GPTConfig(Coqpit):
             "weight_decay": 0.0,
         }
     )
+
+    # This is dumb and needs to change 🧑‍🔬
+    def is_kda_layer(self, layer_idx: int) -> bool:
+        return (layer_idx + 1) % self.kda_interleave_ratio != 0
+
+    def get_layer_attention_type(self, layer_idx: int) -> str:
+        if self.is_kda_layer(layer_idx):
+            return "kda"
+        return self.kda_interleave_with
 
     def __post_init__(self):
         # check one of use_canon_layers or use_parallel_blocks or use_per_layer_token_emb is True or None is true
@@ -216,23 +235,30 @@ class TokenformerConfig(GPTConfig):
 
 
 def get_attention(config, depth=None):
-    if config.attention == "regular":
+    # Support layer-specific attention when interleaving is enabled
+    attn_type = config.attention
+    if depth is not None and config.use_kda_interleaving:
+        attn_type = config.get_layer_attention_type(depth)
+
+    if attn_type == "regular":
         return Attention(config)
-    if config.attention == "latent":
+    if attn_type == "latent":
         return MultiHeadLatentAttention(config)
-    elif config.attention == "DiffAttn":
+    elif attn_type == "DiffAttn":
         return MultiheadDiffAttn(config, depth)
-    elif config.attention == "pattention":
+    elif attn_type == "pattention":
         return PattentionSelfAttention(config)
-    elif config.attention == "kvshifting":
+    elif attn_type == "kvshifting":
         return KVShiftingAttention(config)
-    elif config.attention == "dilated":
+    elif attn_type == "dilated":
         return DilatedAttention(config)
-    elif config.attention == "forgetting":
+    elif attn_type == "forgetting":
         return ForgettingAttention(config)
-    elif config.attention == "multi-token":
+    elif attn_type == "multi-token":
         return MultiTokenAttention(config)
-    raise ValueError(f"Unrecognized attention type {config.attention}")
+    elif attn_type == "kda":
+        return KDAAttention(config)
+    raise ValueError(f"Unrecognized attention type {attn_type}")
 
 
 def get_norm(config):
