@@ -3,9 +3,10 @@ from types import SimpleNamespace
 
 import torch
 import torch.nn.functional as F
-from modules.pattention import Pattention
 from torch import nn
 from torch.nn import functional as F
+
+from modules.pattention import Pattention
 
 try:
     from flash_attn import flash_attn_func
@@ -16,7 +17,6 @@ except ImportError:
 try:
     from apex.normalization import FusedRMSNorm as RMSNorm
 except ModuleNotFoundError:
-    print("No fused RMSNorm")
     from norms import RMSNorm
 
 
@@ -58,8 +58,8 @@ class Rotary(torch.nn.Module):
         self.inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
         t = torch.arange(seq_len, device=self.inv_freq.device, dtype=torch.float32)
         freqs = torch.outer(t, self.inv_freq)
-        self.cos = nn.Buffer(freqs.cos().float(), persistent=False)
-        self.sin = nn.Buffer(freqs.sin().float(), persistent=False)
+        self.register_buffer("cos", freqs.cos().float(), persistent=False)
+        self.register_buffer("sin", freqs.sin().float(), persistent=False)
 
     def forward(self, x):
         return self.cos[None, : x.size(-3), None, :], self.sin[
@@ -81,7 +81,7 @@ class Attention(nn.Module):
         self.n_embd = config.n_embd
         self.head_dim = config.n_embd // config.n_head
         self.soft_cap = 50.0 if config.use_soft_logit_capping else 0.0
-        self.use_softpick = config.use_softpick if "use_softpick" in config else False
+        self.use_softpick = getattr(config, "use_softpick", False)
         self.causal = True
 
         # RMSNorm before q and k projections
@@ -253,7 +253,7 @@ class Attention(nn.Module):
 
 class MultiHeadLatentAttention(Attention):
     def __init__(self, config):
-        assert config.n_lantentd > 0, "Must provide number of latent dimensions"
+        assert config.n_latentd > 0, "Must provide number of latent dimensions"
         self.n_latentd = config.n_latentd
         super().__init__(config)
 
@@ -661,6 +661,227 @@ class MultiTokenAttention(Attention):
 
         # Use the fresh mask for this forward pass
         return super().forward(x, q, causal_mask)
+
+
+class KDAAttention(Attention):
+    """
+    Kimi Delta Attention (KDA) - Linear attention with fine-grained gating.
+
+    Reference: https://github.com/MoonshotAI/Kimi-Linear
+
+    Key features:
+    - Channel-wise decay gates (Diag(alpha)) instead of scalar gating
+    - Delta rule with weight decay for associative memory
+    - Hardware-efficient chunkwise parallel computation
+    - O(T) complexity with fixed-size recurrent state
+    """
+
+    def __init__(self, config):
+        # KDA-specific parameters
+        self.chunk_size = getattr(config, 'kda_chunk_size', 64)
+        self.use_short_conv = getattr(config, 'kda_use_short_conv', True)
+        self.conv_kernel_size = 4
+
+        # Compute decay rank before super().__init__() which calls set_layers()
+        head_dim = config.n_embd // config.n_head
+        self.decay_rank = getattr(config, 'kda_decay_rank', None) or head_dim
+
+        super().__init__(config)
+
+    def set_layers(self, config):
+        """Override to add KDA-specific projections."""
+        # Standard Q, K, V projections
+        self.q_proj = nn.Linear(
+            config.n_embd, config.n_embd, bias=config.bias or config.use_qkv_bias
+        )
+        self.kv_proj = nn.Linear(
+            config.n_embd,
+            2 * config.n_embd // (config.n_head // config.n_kv_head),
+            bias=config.bias or config.use_qkv_bias,
+        )
+
+        # Short convolutions for Q, K, V (following paper)
+        if self.use_short_conv:
+            self.q_conv = nn.Conv1d(
+                config.n_embd, config.n_embd,
+                kernel_size=self.conv_kernel_size,
+                padding=self.conv_kernel_size - 1,
+                groups=config.n_embd
+            )
+            self.k_conv = nn.Conv1d(
+                config.n_embd // (config.n_head // config.n_kv_head),
+                config.n_embd // (config.n_head // config.n_kv_head),
+                kernel_size=self.conv_kernel_size,
+                padding=self.conv_kernel_size - 1,
+                groups=config.n_embd // (config.n_head // config.n_kv_head)
+            )
+            self.v_conv = nn.Conv1d(
+                config.n_embd // (config.n_head // config.n_kv_head),
+                config.n_embd // (config.n_head // config.n_kv_head),
+                kernel_size=self.conv_kernel_size,
+                padding=self.conv_kernel_size - 1,
+                groups=config.n_embd // (config.n_head // config.n_kv_head)
+            )
+
+        # Channel-wise decay parameters (low-rank for efficiency)
+        self.alpha_down = nn.Linear(config.n_embd, self.decay_rank, bias=False)
+        self.alpha_up = nn.Linear(self.decay_rank, config.n_embd, bias=False)
+
+        # Learning rate beta (per head, scalar)
+        self.beta_proj = nn.Linear(config.n_embd, config.n_head, bias=False)
+
+        # L2 normalization layers for Q and K
+        self.q_norm = RMSNorm(self.head_dim)
+        self.k_norm = RMSNorm(self.head_dim)
+
+        # Output projection
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+
+    def _apply_short_conv(self, x, conv_layer):
+        """Apply short convolution with causal padding."""
+        # x: (B, T, C)
+        B, T, C = x.shape
+        # Conv1d expects (B, C, T)
+        x = x.transpose(1, 2)
+        x = conv_layer(x)
+        # Remove extra padding to maintain causality
+        x = x[:, :, :T]
+        return x.transpose(1, 2)
+
+    def _project_query(self, x, B, T):
+        """Override to add short conv and activation."""
+        q = self.q_proj(x)
+        if self.use_short_conv:
+            q = self._apply_short_conv(q, self.q_conv)
+        q = F.silu(q)  # Swish activation
+        return q.view(B, T, self.n_head, self.head_dim)
+
+    def _project_kv(self, x, B, T):
+        """Override to add short conv and activation."""
+        kv = self.kv_proj(x)
+        # Split into k and v first
+        kv = kv.view(B, T, 2, self.n_kv_head, self.head_dim)
+        k, v = kv.unbind(dim=2)
+
+        # Flatten back to apply conv
+        k = k.reshape(B, T, -1)
+        v = v.reshape(B, T, -1)
+
+        if self.use_short_conv:
+            # Apply conv separately to k and v
+            k = self._apply_short_conv(k, self.k_conv)
+            v = self._apply_short_conv(v, self.v_conv)
+
+        # Apply activation
+        k = F.silu(k)
+        v = F.silu(v)
+
+        # Reshape back
+        k = k.view(B, T, self.n_kv_head, self.head_dim)
+        v = v.view(B, T, self.n_kv_head, self.head_dim)
+
+        return k, v
+
+    def _apply_norm(self, q, k):
+        """Apply L2 normalization to Q and K."""
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+        return q, k
+
+    def _compute_decay_and_beta(self, x):
+        """Compute channel-wise decay alpha and learning rate beta."""
+        B, T, C = x.shape
+
+        # Channel-wise decay via low-rank projection
+        # alpha = sigmoid(up(down(x))) in [0, 1]^d
+        alpha = self.alpha_down(x)
+        alpha = self.alpha_up(alpha)
+        alpha = torch.sigmoid(alpha)
+        alpha = alpha.view(B, T, self.n_head, self.head_dim)
+
+        # Learning rate beta (per head, scalar)
+        beta = torch.sigmoid(self.beta_proj(x))  # (B, T, n_head)
+
+        return alpha, beta
+
+    def _manual_attention(self, q, k, v, T_q, T):
+        """
+        KDA computation using official FLA kernel.
+
+        Uses the optimized chunk_kda kernel from flash-linear-attention library.
+        This ensures correctness and performance.
+        """
+        from fla.ops.kda import chunk_kda
+
+        B, H, T_seq, D = q.shape
+        V = v.shape[-1]
+
+        # Get alpha and beta from cache (computed in forward())
+        # These were computed from the input x
+        if hasattr(self, '_alpha_cache') and hasattr(self, '_beta_cache'):
+            alpha = self._alpha_cache  # [B, T, H, D]
+            beta = self._beta_cache    # [B, T, H]
+        else:
+            # Fallback: use random values for testing
+            alpha = torch.sigmoid(torch.randn(B, T_seq, H, D, device=q.device))
+            beta = torch.sigmoid(torch.randn(B, T_seq, H, device=q.device))
+
+        # Compute g as per-timestep log decay (not cumsum!)
+        # The cumsum is handled internally by chunk_kda
+        g = torch.log(alpha + 1e-10)  # [B, T, H, D]
+
+        # Transpose from [B, H, T, D] to [B, T, H, D] for FLA kernel
+        q = q.transpose(1, 2).contiguous()
+        k = k.transpose(1, 2).contiguous()
+        v = v.transpose(1, 2).contiguous()
+
+        # Call official FLA kernel
+        o, _ = chunk_kda(
+            q=q,
+            k=k,
+            v=v,
+            g=g,
+            beta=beta,
+            scale=D ** -0.5,
+            initial_state=None,
+            output_final_state=False,
+            use_qk_l2norm_in_kernel=True,  # Let FLA handle normalization
+        )
+
+        # Transpose back to [B, H, T, V]
+        o = o.transpose(1, 2).contiguous()
+
+        return o
+
+    def forward(self, x, q=None, mask=None):
+        """Forward pass with KDA attention."""
+        B, T, C = x.size()
+        T_q = q.size(1) if q is not None else T
+
+        # Compute decay and beta from input
+        alpha, beta = self._compute_decay_and_beta(x)
+
+        # Store for use in _manual_attention
+        # (This is a workaround - ideally we'd pass these through)
+        self._alpha_cache = alpha
+        self._beta_cache = beta
+
+        # Project inputs
+        q_proj = self._project_query(q if q is not None else x, B, T_q)
+        k, v = self._project_kv(x, B, T)
+
+        # Skip L2 normalization - FLA kernel will handle it
+        # q_proj, k = self._apply_norm(q_proj, k)
+
+        # No rotary embeddings for KDA (uses learnable decay instead)
+        # Prepare for attention computation
+        q_proj, k, v = self._prepare_qkv(q_proj, k, v)
+
+        # Compute KDA attention (always use manual, no flash attention for linear attention)
+        y = self._manual_attention(q_proj, k, v, T_q, T)
+
+        # Project output
+        return self._project_output(y, B, T_q, C)
 
 
 #
