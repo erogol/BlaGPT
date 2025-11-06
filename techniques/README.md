@@ -2,6 +2,9 @@
 
 This directory tries to explain various techniques implemented in this repository.
 
+## Attention Mechanisms
+- [**Key-Dimension Attention (KDA)**](./kda.md) - Linear-complexity attention with fine-grained gating and delta rule
+
 ## Training Objectives
 - [**Token Order Prediction (TOP)**](./top.md) - Auxiliary loss for improved language modeling through token ranking
 
