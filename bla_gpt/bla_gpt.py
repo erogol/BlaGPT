@@ -71,6 +71,7 @@ class GPTConfig(Coqpit):
     use_qkv_bias: bool = False  # from Qwen, for better length generalization. Not an issue with block_size=1024
     use_pre_post_norm: bool = False  # from Qwen, for better training stability
     rope_theta: float = 10000  # 1000000.0 in llama3 models
+    rope_variant: str = "standard"  # Options: "standard" (2D rotations) or "simplified" (concatenation)
     use_per_token_output_bias: bool = (
         False  # use an embedding layer to add a bias to each token prediction
     )
@@ -187,6 +188,11 @@ class GPTConfig(Coqpit):
                     # Ensure we don't exceed the number of groups
                     group_id = min(group_id, self.weight_sharing_groups - 1)
                     self.weight_sharing_pattern.append(group_id)
+
+        # Validate rope_variant when rotary encoding is used
+        if self.pos_encoding == "rotary":
+            if self.rope_variant not in ['standard', 'simplified']:
+                raise ValueError(f"rope_variant must be 'standard' or 'simplified', got {self.rope_variant}")
 
         # Validate TOP configuration
         if self.use_top and self.top_window_size > self.block_size:
