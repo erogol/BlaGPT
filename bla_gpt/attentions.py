@@ -52,6 +52,24 @@ def apply_rotary_emb(x, cos, sin):
     return torch.cat([y1, y2], 3).type_as(x)
 
 
+def apply_simplified_rotary_emb(x, cos, sin):
+    """Apply simplified RoPE: concat(x[:d/2]·cos, x[:d/2]·sin)
+
+    Takes first half of input dimensions, applies element-wise multiplication
+    with cos and sin, then concatenates to produce full head_dim output.
+
+    Note: Only first half of x receives positional encoding. This is by design.
+    """
+    assert x.ndim == 4  # multihead attention
+    # Use same autocast context as standard RoPE for fair comparison
+    with torch.autocast(device_type=x.device.type, enabled=False):
+        d = x.shape[3] // 2
+        x_half = x[..., :d].float()  # Take first half
+        x_cos = x_half * cos
+        x_sin = x_half * sin
+    return torch.cat([x_cos, x_sin], dim=-1).type_as(x)
+
+
 class Rotary(torch.nn.Module):
     def __init__(self, dim, base=10000, seq_len=1024):
         super().__init__()
@@ -65,6 +83,36 @@ class Rotary(torch.nn.Module):
         return self.cos[None, : x.size(-3), None, :], self.sin[
             None, : x.size(-3), None, :
         ]
+
+
+class SimplifiedRotary(torch.nn.Module):
+    """Simplified RoPE using concatenation instead of 2D rotations.
+
+    Instead of rotating dimension pairs, this applies element-wise cos/sin
+    multiplication and concatenates: q' = concat(q·cos(θ), q·sin(θ))
+
+    Args:
+        dim: Half of head_dim (since concat doubles the dimension)
+        base: Frequency base (default 10000)
+        seq_len: Maximum sequence length for precomputation
+    """
+    def __init__(self, dim, base=10000, seq_len=1024):
+        super().__init__()
+        # No longer need even dimension check since we use all dims
+
+        # FIXED: Creates dim frequencies (one per dimension, no stepping)
+        # This matches the apply_simplified_rotary_emb expectation
+        self.inv_freq = 1.0 / (base ** (torch.arange(0, dim).float() / dim))
+        t = torch.arange(seq_len, device=self.inv_freq.device, dtype=torch.float32)
+        freqs = torch.outer(t, self.inv_freq)
+
+        # Register buffers (non-persistent, same as standard RoPE)
+        self.register_buffer("cos", freqs.cos().float(), persistent=False)
+        self.register_buffer("sin", freqs.sin().float(), persistent=False)
+
+    def forward(self, x):
+        # Slice to sequence length (same indexing as standard Rotary)
+        return self.cos[None, : x.size(-3), None, :], self.sin[None, : x.size(-3), None, :]
 
 
 #
@@ -91,7 +139,21 @@ class Attention(nn.Module):
 
         # Rotary embeddings
         if config.pos_encoding == "rotary":
-            self.rotary = Rotary(self.head_dim, base=config.rope_theta)
+            # Get rope_variant with backward compatibility
+            rope_variant = getattr(config, 'rope_variant', 'standard')
+
+            if rope_variant == 'standard':
+                self.rotary = Rotary(self.head_dim, base=config.rope_theta)
+                self.apply_rope_fn = apply_rotary_emb
+            elif rope_variant == 'simplified':
+                # SimplifiedRotary takes head_dim/2 (will be doubled by concat)
+                self.rotary = SimplifiedRotary(self.head_dim // 2, base=config.rope_theta)
+                self.apply_rope_fn = apply_simplified_rotary_emb
+            else:
+                raise ValueError(f"Unknown rope_variant: {rope_variant}")
+
+            # Log which RoPE variant is being used
+            print(f"  Attention: Using {rope_variant} RoPE with theta={config.rope_theta}")
         elif config.pos_encoding == "relative":
             self.rel_pos_emb = nn.Parameter(
                 torch.zeros(2 * config.block_size - 1, self.head_dim)
@@ -177,9 +239,10 @@ class Attention(nn.Module):
 
     def _apply_rotary(self, q, k, T_q, T):
         cos, sin = self.rotary(q)
-        q = apply_rotary_emb(q, cos, sin)
+        q = self.apply_rope_fn(q, cos, sin)
+        # Recompute cos/sin for k only if sequence lengths differ
         cos, sin = self.rotary(k) if T_q != T else (cos, sin)
-        k = apply_rotary_emb(k, cos, sin)
+        k = self.apply_rope_fn(k, cos, sin)
         return q, k
 
     def _apply_relative_pos(self, q, k, T_q, T):
