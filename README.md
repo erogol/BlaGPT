@@ -6,7 +6,7 @@ Experimental playground for benchmarking language model (LM) architectures, laye
 
 See the [**techniques/**](./techniques/) directory for explanations of various techniques implemented in this repository.
 
-**Latest**: [KDA from Kimi-Linear](./techniques/kda.md) - Linear attention alternative
+**Latest**: [Gated Attention from Qwen](./techniques/gated_attention.md)
 
 ## BlaGPT Model
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
@@ -62,6 +62,8 @@ PolyReLU - [link](https://arxiv.org/html/2411.03884v1) - best_model_loss: `3.241
 TOP loss - [link](https://erogol.notion.site/Predicting-the-Order-of-Upcoming-Tokens-Improves-Language-Modeling-25c7621486338183a12ec3621ee8a6b5?source=copy_link) - best_model_loss: `3.2411` -> loss: `3.2636` - peak memory: `47816 MiB`
 
 Simplified RoPe - [link](https://x.com/zhaisf/status/1999050766691205363?s=20) - best_model_loss: `3.2411` -> loss: `3.2620` - peak memory: `43585 MiB` - step_avg: `388.54ms`
+
+Gated Attention - [link](https://arxiv.org/abs/2505.06708) - best_model_loss: `3.2411` -> new_best_model_loss: `3.2327` - peak memory: `45968 MiB` - step_avg: `413.01ms`
 
 
 ## Other Models
