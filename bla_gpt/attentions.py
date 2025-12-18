@@ -947,6 +947,131 @@ class KDAAttention(Attention):
         return self._project_output(y, B, T_q, C)
 
 
+class GatedAttention(Attention):
+    """
+    Gated Attention with head-specific sigmoid gates applied after SDPA.
+
+    From paper: Gated Attention for Large Language Models (arXiv:2505.06708)
+    Qwen Team, Alibaba Group (May 2025)
+
+    Applies elementwise multiplicative gating: Y' = Y ⊙ sigmoid(X·W_gate)
+    where X is the pre-normalized input hidden states.
+
+    Key features:
+    - Head-specific gates (each head has own gate parameters)
+    - Query-dependent gating (gates computed from input hidden states)
+    - Eliminates attention sink phenomenon (46.7% → 4.8%)
+    - Improves training stability and tolerates larger learning rates
+    - Reduces massive activations
+
+    Performance gains (from paper, 15B MoE model):
+    - PPL: -0.265 improvement
+    - MMLU: +2.03 points
+    - GSM8k: +2.35 points
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+
+        # Gate projection: maps d_model → d_model (full dimensionality)
+        # This will be reshaped to (n_head, head_dim) for per-head gating
+        self.gate_proj = nn.Linear(
+            config.n_embd,
+            config.n_embd,
+            bias=config.bias
+        )
+
+    def forward(self, x, q=None, mask=None):
+        """
+        Forward pass with gated attention.
+
+        Stores pre-norm input for gate computation, then calls parent forward.
+        """
+        # Store pre-norm input for gate computation
+        # This is the hidden state after layer normalization (ln_1 in Block)
+        self.x_input = x  # Shape: (B, T, n_embd)
+
+        # Call parent forward which will eventually call our overridden methods
+        return super().forward(x, q, mask)
+
+    def _flash_attention(self, q, k, v):
+        """
+        Flash attention with gating applied to output.
+
+        Args:
+            q: Query tensor (B, n_head, T, head_dim)
+            k: Key tensor (B, n_head, T, head_dim)
+            v: Value tensor (B, n_head, T, head_dim)
+
+        Returns:
+            Gated attention output (B, n_head, T, head_dim)
+        """
+        # Get standard SDPA output from parent
+        y = super()._flash_attention(q, k, v)
+        # y shape: (B, n_head, T, head_dim)
+
+        # Apply per-head gating
+        y = self._apply_gate(y)
+        return y
+
+    def _manual_attention(self, q, k, v, T_q, T):
+        """
+        Manual attention with gating applied to output.
+
+        Args:
+            q: Query tensor (B, n_head, T, head_dim)
+            k: Key tensor (B, n_head, T, head_dim)
+            v: Value tensor (B, n_head, T, head_dim)
+            T_q: Query sequence length
+            T: Key/Value sequence length
+
+        Returns:
+            Gated attention output (B, n_head, T, head_dim)
+        """
+        # Get standard SDPA output from parent
+        y = super()._manual_attention(q, k, v, T_q, T)
+        # y shape: (B, n_head, T, head_dim)
+
+        # Apply per-head gating
+        y = self._apply_gate(y)
+        return y
+
+    def _apply_gate(self, y):
+        """
+        Apply head-specific sigmoid gates to SDPA output.
+
+        Computes gates from pre-norm input hidden states, then applies
+        multiplicative gating element-wise to attention output.
+
+        Args:
+            y: SDPA output, shape (B, n_head, T, head_dim)
+
+        Returns:
+            gated_y: Gated output, same shape (B, n_head, T, head_dim)
+        """
+        B, n_head, T, head_dim = y.shape
+
+        # Compute gates from pre-norm input: sigmoid(x @ W_gate)
+        # x_input: (B, T, n_embd)
+        # gate_proj: (n_embd, n_embd)
+        gates = torch.sigmoid(self.gate_proj(self.x_input))
+        # gates: (B, T, n_embd)
+
+        # Reshape gates to match per-head structure
+        # (B, T, n_embd) → (B, T, n_head, head_dim)
+        gates = gates.view(B, T, n_head, head_dim)
+
+        # Transpose to match y's shape
+        # (B, T, n_head, head_dim) → (B, n_head, T, head_dim)
+        gates = gates.transpose(1, 2)
+
+        # Apply multiplicative gating element-wise
+        # This creates query-dependent sparsity in the attention output
+        gated_y = y * gates
+
+        return gated_y
+
+
 #
 # WIP Implementations
 #
