@@ -14,9 +14,9 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 from attentions import (Attention, DilatedAttention, ForgettingAttention,
-                        KDAAttention, KVShiftingAttention, MultiheadDiffAttn,
-                        MultiHeadLatentAttention, MultiTokenAttention,
-                        PattentionSelfAttention, soft_cap)
+                        GatedAttention, KDAAttention, KVShiftingAttention,
+                        MultiheadDiffAttn, MultiHeadLatentAttention,
+                        MultiTokenAttention, PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
 from losses import compute_top_loss, compute_z_loss
 from mlps import (MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, PolyNorm_MLP,
@@ -264,6 +264,8 @@ def get_attention(config, depth=None):
         return MultiTokenAttention(config)
     elif attn_type == "kda":
         return KDAAttention(config)
+    elif attn_type == "gated":
+        return GatedAttention(config)
     raise ValueError(f"Unrecognized attention type {attn_type}")
 
 

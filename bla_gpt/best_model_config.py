@@ -31,7 +31,7 @@ class BestConfig(GPTConfig):
 
     # Transformer parameters
     norm_layer: str = "rmsnorm"  # type of normalization layer to use
-    attention: str = "regular"  # attention type in `get_attention()`
+    attention: str = "gated"  # attention type in `get_attention()`
     activation: str = "swiglu"  # activation type in `get_mlp()`
     use_soft_logit_capping: bool = False
     n_kv_head: int = 4  # Number of heads for the key and value (Grouped Query Attention), if n_kv_head == n_head, it is full attention
@@ -43,6 +43,7 @@ class BestConfig(GPTConfig):
     use_qkv_bias: bool = False  # from Qwen, for better length generalization. Not an issue with block_size=1024
     use_pre_post_norm: bool = False  # from Qwen, for better training stability
     rope_theta: float = 10000  # 1000000.0 in llama3 models
+    rope_variant: str = "standard"
     use_per_token_output_bias: bool = (
         False  # use an embedding layer to add a bias to each token prediction
     )
