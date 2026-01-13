@@ -113,3 +113,65 @@ def register_hnet():
     from hnet import HNet, HNetConfig
 
     return HNetConfig, HNet
+
+
+@register_model
+def register_resformer():
+    """
+    ResFormer with Identity value residuals (λ=0.5 fixed).
+    Simplest variant - no hyperparameter tuning needed.
+    """
+    from resformer import ResFormerIdentityConfig, ResFormer
+
+    return ResFormerIdentityConfig, ResFormer
+
+
+@register_model
+def register_resformer_constant():
+    """
+    ResFormer with Constant value residuals (λ_1=2.0, λ_2=1.0).
+    Best performing fixed-coefficient variant from paper.
+    """
+    from resformer import ResFormerConstantConfig, ResFormer
+
+    return ResFormerConstantConfig, ResFormer
+
+
+@register_model
+def register_resformer_learnable():
+    """
+    ResFormer with Learnable value residuals.
+    Lambda parameters learned during training.
+    """
+    from resformer import ResFormerLearnableConfig, ResFormer
+
+    return ResFormerLearnableConfig, ResFormer
+
+
+@register_model
+def register_resformer_plus():
+    """
+    ResFormer with Learnable-Plus value residuals.
+    Best performing variant - uses softmax distribution across layers.
+    Deeper layers automatically learn to use more V_1.
+
+    Expected results (from paper):
+    - ~2% better validation loss than vanilla Transformer
+    - 16-20% more parameter efficient
+    - 20% more data efficient
+    """
+    from resformer import ResFormerPlusConfig, ResFormer
+
+    return ResFormerPlusConfig, ResFormer
+
+
+@register_model
+def register_resformer_sparse():
+    """
+    ResFormer with Sparse value residuals.
+    Only applies value residual to last 1/3 of layers.
+    Slightly better performance with fewer parameters.
+    """
+    from resformer import ResFormerSparseConfig, ResFormer
+
+    return ResFormerSparseConfig, ResFormer
