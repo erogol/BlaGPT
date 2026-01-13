@@ -6,7 +6,7 @@ Experimental playground for benchmarking language model (LM) architectures, laye
 
 See the [**techniques/**](./techniques/) directory for explanations of various techniques implemented in this repository.
 
-**Latest**: [Gated Attention from Qwen](./techniques/gated_attention.md)
+**Latest**: [ResFormer - Value Residual Learning](./techniques/resformer.md)
 
 ## BlaGPT Model
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
@@ -59,11 +59,13 @@ PolyNorm - [link](https://arxiv.org/html/2411.03884v1) - best_model_loss: `3.241
 
 PolyReLU - [link](https://arxiv.org/html/2411.03884v1) - best_model_loss: `3.2411` -> loss: `3.2642` - peak memory: `40890 MiB`
 
-TOP loss - [link](https://erogol.notion.site/Predicting-the-Order-of-Upcoming-Tokens-Improves-Language-Modeling-25c7621486338183a12ec3621ee8a6b5?source=copy_link) - best_model_loss: `3.2411` -> loss: `3.2636` - peak memory: `47816 MiB`
+TOP loss - [paper](https://arxiv.org/abs/2508.19228) | [explanation](./techniques/top.md) - best_model_loss: `3.2411` -> loss: `3.2636` - peak memory: `47816 MiB`
 
 Simplified RoPe - [link](https://x.com/zhaisf/status/1999050766691205363?s=20) - best_model_loss: `3.2411` -> loss: `3.2620` - peak memory: `43585 MiB` - step_avg: `388.54ms`
 
-Gated Attention - [link](https://arxiv.org/abs/2505.06708) - best_model_loss: `3.2411` -> new_best_model_loss: `3.2327` - peak memory: `45968 MiB` - step_avg: `413.01ms`
+Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./techniques/gated_attention.md) - best_model_loss: `3.2411` -> new_best_model_loss: `3.2327` - peak memory: `45968 MiB` - step_avg: `413.01ms`
+
+ResFormer (Plus) - [paper](https://arxiv.org/html/2410.17897v5) | [explanation](./techniques/resformer.md) - best_model_loss: `3.2327` -> model_loss: `3.3538` - peak memory: `38223 MiB` - step_avg: `326.32ms`
 
 
 ## Other Models
@@ -125,11 +127,11 @@ MARS - [link](https://github.com/AGI-Arena/MARS) - loss: `3.3459`, peak VRAM: 40
 
 Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak VRAM: `40332MB`, step_time: `620.24ms`
 
-AdaMuon - [link](https://arxiv.org/abs/2507.11005) - Adaptive Muon with second-moment estimation (default optimizer) - **See [detailed explanation](./techniques/adamuon.md)**
+AdaMuon - [paper](https://arxiv.org/abs/2507.11005) | [explanation](./techniques/adamuon.md) - Adaptive Muon with second-moment estimation (default optimizer)
 
 BiClip - [link](https://arxiv.org/pdf/2502.04164) - (not working well) loss: `7.2292`, peak VRAM: `39751 MiB`, step_time: `510ms`
 
-NorMuon - [link](https://arxiv.org/html/2510.05491v1) - best_model_loss: `3.2411` -> loss: `3.4630`, peak VRAM: `44154 MiB`, step_time: `387.46 ms`  - **See [detailed explanation](./techniques/normuon.md)**
+NorMuon - [paper](https://arxiv.org/html/2510.05491v1) | [explanation](./techniques/normuon.md) - best_model_loss: `3.2411` -> loss: `3.4630`, peak VRAM: `44154 MiB`, step_time: `387.46 ms`
 
 
 ## Adding a New Model
