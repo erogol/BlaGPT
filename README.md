@@ -8,10 +8,11 @@ See the [**techniques/**](./techniques/) directory for explanations of various t
 
 **Latest**: [ResFormer - Value Residual Learning](./techniques/resformer.md)
 
-## BlaGPT Model
+## Techniquies under BlaGPT
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
 
-Results below are the numbers after an epoch of training with fineweb10B, mostly using the default parameters. My goal is to see how things work without fiddling with the model and hyperparameters a lot.
+I basically do a greedy architecture search and add every new technique on top of the best model config and see if it improves the performance or not.
+I know it is now the best way but it is fun and help have at least some intuition about what works and what doesn't.
 
 Multi-token prediction - [link](https://arxiv.org/pdf/2404.19737)
 
@@ -63,7 +64,7 @@ TOP loss - [paper](https://arxiv.org/abs/2508.19228) | [explanation](./technique
 
 Simplified RoPe - [link](https://x.com/zhaisf/status/1999050766691205363?s=20) - best_model_loss: `3.2411` -> loss: `3.2620` - peak memory: `43585 MiB` - step_avg: `388.54ms`
 
-Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./techniques/gated_attention.md) - best_model_loss: `3.2411` -> new_best_model_loss: `3.2327` - peak memory: `45968 MiB` - step_avg: `413.01ms`
+👑 Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./techniques/gated_attention.md) - best_model_loss: `3.2411` -> new_best_model_loss: `3.2327` - peak memory: `45968 MiB` - step_avg: `413.01ms`
 
 ResFormer (Plus) - [paper](https://arxiv.org/html/2410.17897v5) | [explanation](./techniques/resformer.md) - best_model_loss: `3.2327` -> model_loss: `3.3538` - peak memory: `38223 MiB` - step_avg: `326.32ms`
 
@@ -127,14 +128,13 @@ MARS - [link](https://github.com/AGI-Arena/MARS) - loss: `3.3459`, peak VRAM: 40
 
 Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak VRAM: `40332MB`, step_time: `620.24ms`
 
-Cautious Weight Decay - [paper](https://arxiv.org/abs/2510.12402) | [explanation](./techniques/cautious_weight_decay.md) - Selective weight decay technique for Muon (enable via `use_cautious_weight_decay=True`)
-
 AdaMuon - [paper](https://arxiv.org/abs/2507.11005) | [explanation](./techniques/adamuon.md) - Adaptive Muon with second-moment estimation (default optimizer)
 
 BiClip - [link](https://arxiv.org/pdf/2502.04164) - (not working well) loss: `7.2292`, peak VRAM: `39751 MiB`, step_time: `510ms`
 
 NorMuon - [paper](https://arxiv.org/html/2510.05491v1) | [explanation](./techniques/normuon.md) - best_model_loss: `3.2411` -> loss: `3.4630`, peak VRAM: `44154 MiB`, step_time: `387.46 ms`
 
+Cautious Weight Decay - [paper](https://arxiv.org/pdf/2510.12402v1) | [explanation](./techniques/cautious_weight_decay.md) - best_model_loss: `3.2327` -> loss: `3.2334`, peak VRAM: `45971 MiB`, step_time: `434.2 ms`
 
 ## Adding a New Model
 
