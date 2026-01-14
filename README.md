@@ -127,6 +127,8 @@ MARS - [link](https://github.com/AGI-Arena/MARS) - loss: `3.3459`, peak VRAM: 40
 
 Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak VRAM: `40332MB`, step_time: `620.24ms`
 
+Cautious Weight Decay - [paper](https://arxiv.org/abs/2510.12402) | [explanation](./techniques/cautious_weight_decay.md) - Selective weight decay technique for Muon (enable via `use_cautious_weight_decay=True`)
+
 AdaMuon - [paper](https://arxiv.org/abs/2507.11005) | [explanation](./techniques/adamuon.md) - Adaptive Muon with second-moment estimation (default optimizer)
 
 BiClip - [link](https://arxiv.org/pdf/2502.04164) - (not working well) loss: `7.2292`, peak VRAM: `39751 MiB`, step_time: `510ms`
