@@ -83,10 +83,14 @@ def get_optimizer(
             if p.ndim < 2 or "embed_tokens" in name or "lm_head"  in name
 
         ]
+        # Extract CWD flag if present
+        use_cwd = optimizer_params.pop('use_cautious_weight_decay', False)
+
         return optimizer(
             lr=lr,
             muon_params=muon_params,
             adamw_params=adamw_params,
+            use_cautious_weight_decay=use_cwd,
             **optimizer_params
         )
     elif optimizer_name.lower() == "adamuon":

@@ -156,6 +156,7 @@ class Hyperparameters(Coqpit):
             "betas": (0.9, 0.95),
             "eps": 1e-8,
             "weight_decay": 0.0,
+            "use_cautious_weight_decay": False,
         }
     )
     learning_rate: float = 0.001

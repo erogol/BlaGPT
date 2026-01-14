@@ -74,6 +74,7 @@ class Muon(torch.optim.Optimizer):
         adamw_params=None,
         betas=(0.9, 0.95),
         eps=1e-8,
+        use_cautious_weight_decay=False,
         **kwargs,
     ):
 
@@ -85,6 +86,7 @@ class Muon(torch.optim.Optimizer):
             ns_steps=ns_steps,
             adamw_betas=betas,
             adamw_eps=eps,
+            use_cautious_weight_decay=use_cautious_weight_decay,
         )
 
         params = list(muon_params)
@@ -160,8 +162,23 @@ class Muon(torch.optim.Optimizer):
                 # scale update
                 adjusted_lr = self.adjust_lr_for_muon(lr, p.shape)
 
-                # apply weight decay
-                p.data.mul_(1 - lr * wd)
+                # apply weight decay (with optional cautious variant)
+                if group["use_cautious_weight_decay"]:
+                    # Cautious weight decay: only decay when momentum and param signs align
+                    momentum_buf = state["momentum_buffer"]
+                    # Check if parameter was reshaped - momentum buffer will match reshaped gradient
+                    if original_shape != p.shape or p.data.ndim > 2:
+                        # Reshape param to match momentum buffer
+                        p_view = p.data.view(momentum_buf.shape)
+                        mask = (momentum_buf * p_view >= 0).float()
+                        p_view.mul_(1 - lr * wd * mask)
+                    else:
+                        # No reshaping needed
+                        mask = (momentum_buf * p.data >= 0).float()
+                        p.data.mul_(1 - lr * wd * mask)
+                else:
+                    # Standard decoupled weight decay
+                    p.data.mul_(1 - lr * wd)
 
                 # apply update
                 p.data.add_(u.view(original_shape), alpha=-adjusted_lr)
@@ -197,7 +214,19 @@ class Muon(torch.optim.Optimizer):
                 bias_correction1 = 1 - beta1**step
                 bias_correction2 = 1 - beta2**step
                 scale = bias_correction1 / bias_correction2**0.5
-                p.data.mul_(1 - lr * weight_decay)
+
+                # apply weight decay (with optional cautious variant)
+                if group["use_cautious_weight_decay"]:
+                    # Cautious weight decay: only decay when momentum and param signs align
+                    momentum_buf = state["moment1"]  # exp_avg in AdamW
+                    # Compute mask: 1 where signs align, 0 otherwise
+                    mask = (momentum_buf * p.data >= 0).float()
+                    # Apply selective decay
+                    p.data.mul_(1 - lr * weight_decay * mask)
+                else:
+                    # Standard decoupled weight decay
+                    p.data.mul_(1 - lr * weight_decay)
+
                 p.data.add_(g, alpha=-lr / scale)
 
         return loss
