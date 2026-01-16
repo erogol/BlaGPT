@@ -6,7 +6,7 @@ Experimental playground for benchmarking language model (LM) architectures, laye
 
 See the [**techniques/**](./techniques/) directory for explanations of various techniques implemented in this repository.
 
-**Latest**: [ResFormer - Value Residual Learning](./techniques/resformer.md)
+**Latest**: [STEM](./techniques/stem.md)
 
 ## Techniquies under BlaGPT
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
