@@ -163,6 +163,7 @@ class Muon(torch.optim.Optimizer):
                 adjusted_lr = self.adjust_lr_for_muon(lr, p.shape)
 
                 # apply weight decay (with optional cautious variant)
+                # NOTE: Using adjusted_lr to maintain proper balance with scaled updates
                 if group["use_cautious_weight_decay"]:
                     # Cautious weight decay: only decay when momentum and param signs align
                     momentum_buf = state["momentum_buffer"]
@@ -171,14 +172,14 @@ class Muon(torch.optim.Optimizer):
                         # Reshape param to match momentum buffer
                         p_view = p.data.view(momentum_buf.shape)
                         mask = (momentum_buf * p_view >= 0).float()
-                        p_view.mul_(1 - lr * wd * mask)
+                        p_view.mul_(1 - adjusted_lr * wd * mask)
                     else:
                         # No reshaping needed
                         mask = (momentum_buf * p.data >= 0).float()
-                        p.data.mul_(1 - lr * wd * mask)
+                        p.data.mul_(1 - adjusted_lr * wd * mask)
                 else:
                     # Standard decoupled weight decay
-                    p.data.mul_(1 - lr * wd)
+                    p.data.mul_(1 - adjusted_lr * wd)
 
                 # apply update
                 p.data.add_(u.view(original_shape), alpha=-adjusted_lr)
