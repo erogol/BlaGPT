@@ -58,7 +58,7 @@ class Primer_MLP(nn.Module):
         self.c_proj = nn.Parameter(torch.zeros(config.n_embd, expand_dim))
         self.c_proj_scale = nn.Parameter(torch.ones(config.n_embd))
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = F.linear(
             x, (self.c_fc * self.c_fc_scale.unsqueeze(0)).type_as(x)
         )  # fuse weight & weight_scale mults
@@ -77,7 +77,7 @@ class MLP(nn.Module):
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = self.c_fc(x)
         x = self.gelu(x)
         x = self.c_proj(x)
@@ -93,7 +93,7 @@ class GeGLU_MLP(nn.Module):
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         gate = self.c_gate(x)
         x = self.c_fc(x)
         x = F.gelu(gate) * x
@@ -110,7 +110,7 @@ class SwiGLU_MLP(nn.Module):
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         gate = self.c_gate(x)
         x = self.c_fc(x)
         x = F.silu(gate) * x
@@ -130,7 +130,7 @@ class Negout_MLP(nn.Module):
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         pos = self.c_fc(x)
         neg = self.c_fc_neg(x)
         x = torch.where(neg > pos, -neg, pos)
@@ -159,7 +159,7 @@ class Maxout_MLP(nn.Module):
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         # Apply each linear transformation
         pieces = [fc(x) for fc in self.c_fc]
 
@@ -248,7 +248,7 @@ class PolyReLU_MLP(nn.Module):
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = self.c_fc(x)
         x = self.polyrelu(x)
         x = self.c_proj(x)
@@ -265,9 +265,54 @@ class PolyNorm_MLP(nn.Module):
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = self.c_fc(x)
         x = self.polynorm(x)
         x = self.c_proj(x)
         x = self.dropout(x)
+        return x
+
+
+class STEM_MLP(nn.Module):
+    """STEM: Scaling Transformers with Embedding Modules
+
+    Replaces up-projection with token-indexed embedding table while keeping
+    gate and down projections. Based on https://arxiv.org/abs/2601.10639
+    """
+    def __init__(self, config):
+        super().__init__()
+        # Gate projection (context-dependent) - KEPT
+        self.c_gate = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+
+        # STEM embedding table - REPLACES up projection
+        self.stem_embedding = nn.Embedding(config.vocab_size, 4 * config.n_embd)
+
+        # Down projection - KEPT
+        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x, **kwargs):
+        """
+        Args:
+            x: [B, T, n_embd] hidden states
+            **kwargs: Must contain 'token_ids' [B, T] token IDs (REQUIRED for STEM)
+        """
+        token_ids = kwargs.get('token_ids')
+        if token_ids is None:
+            raise ValueError("STEM_MLP requires token_ids in kwargs")
+
+        # Context-dependent gate: SiLU(W_gate @ x)
+        gate = F.silu(self.c_gate(x))
+
+        # Token-dependent up: embedding lookup
+        up = self.stem_embedding(token_ids)
+
+        # Gated multiplication
+        x = gate * up
+
+        # Down projection
+        x = self.c_proj(x)
+        x = self.dropout(x)
+
         return x
