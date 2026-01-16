@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
+
 from attentions import (Attention, DilatedAttention, ForgettingAttention,
                         GatedAttention, KDAAttention, KVShiftingAttention,
                         MultiheadDiffAttn, MultiHeadLatentAttention,
@@ -20,7 +21,7 @@ from attentions import (Attention, DilatedAttention, ForgettingAttention,
 from coqpit import Coqpit
 from losses import compute_top_loss, compute_z_loss
 from mlps import (MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, PolyNorm_MLP,
-                  PolyReLU_MLP, Primer_MLP, SwiGLU_MLP)
+                  PolyReLU_MLP, Primer_MLP, STEM_MLP, SwiGLU_MLP)
 from modules.canon_layer import CanonLayer
 from modules.pattention import Pattention
 from norms import DyTNorm, LayerNorm, RMSNorm
@@ -121,6 +122,11 @@ class GPTConfig(Coqpit):
     weight_sharing_pattern: list[int] = field(default_factory=lambda: [])  # Pattern for weight sharing: [0, 0, 1, 1] means layers 0&1 share weights, layers 2&3 share weights
     weight_sharing_groups: int = 1  # Number of weight sharing groups (alternative to pattern specification)
 
+    # STEM (Scaling Transformers with Embedding Modules) parameters
+    use_stem: bool = False  # Enable STEM: replace up-projection with token-indexed embeddings
+    stem_ratio: str = None  # "1/3", "1/2", or "full" - auto-compute which layers use STEM
+    stem_layers: list[int] = field(default_factory=list)  # Or specify exact layer indices
+
     """About z-loss: instability occurs
     when the logits diverge and become very negative, as
     illustrated in Figure 4 for a 2.4M parameter model at
@@ -152,6 +158,29 @@ class GPTConfig(Coqpit):
         if self.is_kda_layer(layer_idx):
             return "kda"
         return self.kda_interleave_with
+
+    def is_stem_layer(self, layer_idx: int) -> bool:
+        """Check if layer should use STEM based on config"""
+        if not self.use_stem:
+            return False
+
+        # Never replace first layer (critical for initial processing)
+        if layer_idx == 0:
+            return False
+
+        # Explicit layer list
+        if self.stem_layers:
+            return layer_idx in self.stem_layers
+
+        # Auto-compute based on ratio
+        if self.stem_ratio == "1/3":
+            return (layer_idx + 1) % 3 == 0
+        elif self.stem_ratio == "1/2":
+            return (layer_idx + 1) % 2 == 0
+        elif self.stem_ratio == "full":
+            return True
+
+        return False
 
     def __post_init__(self):
         # check one of use_canon_layers or use_parallel_blocks or use_per_layer_token_emb is True or None is true
@@ -279,7 +308,12 @@ def get_norm(config):
     raise ValueError(f"Unrecognized norm type {config.norm_layer}")
 
 
-def get_mlp(config):
+def get_mlp(config, layer_idx=None):
+    # Check if this layer should use STEM
+    if layer_idx is not None and config.is_stem_layer(layer_idx):
+        return STEM_MLP(config)
+
+    # Standard MLP selection
     if config.activation == "gelu":
         return MLP(config)
     elif config.activation == "geglu":
@@ -330,7 +364,7 @@ class Block(nn.Module):
         self.ln_1 = get_norm(config)
         self.attn = get_attention(config, depth)
         self.ln_2 = get_norm(config)
-        self.mlp = get_mlp(config)
+        self.mlp = get_mlp(config, depth)  # Pass depth for STEM layer selection
 
         # Optional norm layers as per Gemma2
         self.ln_3 = get_norm(config) if config.use_pre_post_norm else None
@@ -340,9 +374,9 @@ class Block(nn.Module):
         self.res_w1 = nn.Parameter(torch.ones(1)) if config.use_res_weights else None
         self.res_w2 = nn.Parameter(torch.ones(1)) if config.use_res_weights else None
 
-    def _process_branch(self, x, ln_pre, branch_fn, ln_post=None, res_weight=None):
+    def _process_branch(self, x, ln_pre, branch_fn, ln_post=None, res_weight=None, **kwargs):
         # Process input through branch (attention or MLP)
-        branch_out = branch_fn(ln_pre(x))
+        branch_out = branch_fn(ln_pre(x), **kwargs)
 
         # Apply optional post-normalization
         if ln_post is not None:
@@ -353,12 +387,12 @@ class Block(nn.Module):
             return res_weight * x + branch_out
         return x + branch_out
 
-    def forward(self, x, *args):
-        # Attention branch
+    def forward(self, x, **kwargs):
+        # Attention branch (doesn't need kwargs)
         x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1)
 
-        # MLP branch
-        x = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, self.res_w2)
+        # MLP branch - pass kwargs through
+        x = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, self.res_w2, **kwargs)
 
         return x
 
@@ -381,8 +415,14 @@ class BlockWithTokenEmbedding(Block):
             config.per_layer_token_emb_dim, config.n_embd, bias=config.bias
         )
 
-    def forward(self, x, idx, *args):
-        x = super().forward(x)
+    def forward(self, x, **kwargs):
+        # Pass kwargs through to parent (includes token_ids)
+        x = super().forward(x, **kwargs)
+
+        # Extract idx from kwargs for token embedding lookup
+        idx = kwargs.get('token_ids')
+        if idx is None:
+            raise ValueError("BlockWithTokenEmbedding requires token_ids in kwargs")
 
         # Residual down projection
         x_down = self.emb_proj_down(x)
@@ -401,21 +441,21 @@ class ParallelBlock(Block):
     with causal constraints.
     """
 
-    def _process_branch(self, x, ln_pre, branch_fn, ln_post=None):
+    def _process_branch(self, x, ln_pre, branch_fn, ln_post=None, **kwargs):
         # Process input through branch (attention or MLP)
-        branch_out = branch_fn(ln_pre(x))
+        branch_out = branch_fn(ln_pre(x), **kwargs)
 
         # Apply optional post-normalization
         if ln_post is not None:
             branch_out = ln_post(branch_out)
         return branch_out
 
-    def forward(self, x, *args):
-        # Attention branch - already has causal masking
+    def forward(self, x, **kwargs):
+        # Attention branch (doesn't need kwargs)
         x1 = self._process_branch(x, self.ln_1, self.attn, self.ln_3)
 
-        # Apply MLP to each position separately then mask to maintain causality
-        x2 = self._process_branch(x, self.ln_2, self.mlp, self.ln_4)
+        # MLP branch - pass kwargs through
+        x2 = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, **kwargs)
 
         # Zero out future influences - each position only influenced by current and past tokens
         return x + x1 + x2
@@ -442,7 +482,7 @@ class CanonBlock(Block):
         )
 
     def _process_branch(
-        self, x, ln_pre, branch_fn, canon_fn, ln_post=None, res_weight=None
+        self, x, ln_pre, branch_fn, canon_fn, ln_post=None, res_weight=None, **kwargs
     ):
         # Pre-norm
         branch_out = ln_pre(x)
@@ -451,7 +491,7 @@ class CanonBlock(Block):
         branch_out = branch_out + canon_fn(branch_out)
 
         # Apply branch function (attention or MLP)
-        branch_out = branch_fn(branch_out)
+        branch_out = branch_fn(branch_out, **kwargs)
 
         # Apply optional post-normalization
         if ln_post is not None:
@@ -464,15 +504,15 @@ class CanonBlock(Block):
         # Residual connection
         return x + branch_out
 
-    def forward(self, x, *args):
-        # Attention branch
+    def forward(self, x, **kwargs):
+        # Attention branch (doesn't need kwargs)
         x = self._process_branch(
             x, self.ln_1, self.attn, self.canon_attn, self.ln_3, self.res_w1
         )
 
-        # MLP branch
+        # MLP branch - pass kwargs through
         x = self._process_branch(
-            x, self.ln_2, self.mlp, self.canon_mlp, self.ln_4, self.res_w2
+            x, self.ln_2, self.mlp, self.canon_mlp, self.ln_4, self.res_w2, **kwargs
         )
 
         return x
@@ -651,7 +691,7 @@ class GPT(nn.Module):
         else:
             x = self.transformer.drop(tok_emb)
         for block in self.transformer.h:
-            x = block(x, idx)
+            x = block(x, token_ids=idx)
         x = self.transformer.ln_f(x)
 
         # TODO: simplify this

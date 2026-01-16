@@ -152,8 +152,6 @@ class Attention(nn.Module):
             else:
                 raise ValueError(f"Unknown rope_variant: {rope_variant}")
 
-            # Log which RoPE variant is being used
-            print(f"  Attention: Using {rope_variant} RoPE with theta={config.rope_theta}")
         elif config.pos_encoding == "relative":
             self.rel_pos_emb = nn.Parameter(
                 torch.zeros(2 * config.block_size - 1, self.head_dim)
