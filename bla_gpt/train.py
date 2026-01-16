@@ -191,7 +191,6 @@ if __name__ == "__main__":
 
     args = Hyperparameters()
     model_config, model = get_model(cli_args.model_name)
-    model_config = model_config()
 
     # Override Hyperparameters with matching model_config attributes
     for key, value in model_config.to_dict().items():
