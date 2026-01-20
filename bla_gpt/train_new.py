@@ -17,6 +17,14 @@ from torch.amp.autocast_mode import autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from utils import get_model
 from optimizers import get_optimizer
+from data_loaders import (
+    DataShard,
+    ByteDataShard,
+    DistributedDataLoader,
+    HFStreamingDataLoader,
+    HFDatasetConfig,
+)
+from tokenizers_config import TokenizerConfig, TokenizerWrapper
 
 # Set environment variables
 os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
@@ -60,6 +68,44 @@ class Hyperparameters(Coqpit):
     byte_data_dir: str = field(
         default="../data/fineweb10B_bytes",
         metadata={"help": "Directory containing byte data (.bin files)"}
+    )
+    # HuggingFace streaming mode
+    use_hf_streaming: bool = field(
+        default=False,
+        metadata={"help": "Use HuggingFace streaming datasets instead of binary shards"}
+    )
+    hf_dataset: str = field(
+        default="HuggingFaceFW/fineweb",
+        metadata={"help": "HuggingFace dataset name or path"}
+    )
+    hf_dataset_config: Optional[str] = field(
+        default="sample-10BT",
+        metadata={"help": "HuggingFace dataset configuration/subset name"}
+    )
+    hf_text_column: str = field(
+        default="text",
+        metadata={"help": "Name of the text column in the dataset"}
+    )
+    hf_val_dataset: Optional[str] = field(
+        default=None,
+        metadata={"help": "Validation dataset name (defaults to hf_dataset if None)"}
+    )
+    hf_val_dataset_config: Optional[str] = field(
+        default=None,
+        metadata={"help": "Validation dataset config (defaults to hf_dataset_config if None)"}
+    )
+    hf_shuffle_buffer: int = field(
+        default=10000,
+        metadata={"help": "Shuffle buffer size for streaming datasets"}
+    )
+    # Tokenizer configuration
+    tokenizer_backend: str = field(
+        default="tiktoken",
+        metadata={"help": "Tokenizer backend: 'tiktoken' or 'huggingface'"}
+    )
+    tokenizer_name: str = field(
+        default="gpt2",
+        metadata={"help": "Tokenizer name (tiktoken encoding or HF model name)"}
     )
     batch_size: int = field(
         default=8 * 64,
@@ -153,166 +199,6 @@ class TeeLogger:
         return self.terminal.fileno()
 
 
-class DataShard:
-    """Handles loading and validation of data shards."""
-
-    MAGIC_NUMBER = 20240520
-    HEADER_SIZE = 256 * 4
-    VERSION = 1
-
-    @staticmethod
-    def peek_data_shard(filename: str) -> int:
-        with open(filename, "rb") as f:
-            header = np.frombuffer(f.read(DataShard.HEADER_SIZE), dtype=np.int32)
-
-        if header[0] != DataShard.MAGIC_NUMBER:
-            print_rank0("ERROR: magic number mismatch in the data .bin file!")
-            print_rank0("---> HINT: Are you passing in a correct file with --input_bin?")
-            print_rank0(
-                "---> HINT: Dataset encoding changed recently, re-run data prepro or refer again to README"
-            )
-            print_rank0(
-                "---> HINT: For example re-run: `python dev/data/tinyshakespeare.py`, then re-try"
-            )
-            exit(1)
-        assert header[1] == DataShard.VERSION, "Unsupported version"
-        return header[2]
-
-    @staticmethod
-    def load_data_shard(filename: str) -> np.ndarray:
-        with open(filename, "rb") as f:
-            header = np.frombuffer(f.read(DataShard.HEADER_SIZE), dtype=np.int32)
-            assert header[0] == DataShard.MAGIC_NUMBER, "Magic number mismatch"
-            assert header[1] == DataShard.VERSION, "Unsupported version"
-            ntok = header[2]
-            tokens = np.frombuffer(f.read(), dtype=np.uint16)
-
-        assert len(tokens) == ntok, "Token count mismatch"
-        return tokens
-
-
-class ByteDataShard:
-    """Handles loading and validation of byte-level data shards."""
-
-    MAGIC_NUMBER = 20240520
-    HEADER_SIZE = 256 * 4
-    VERSION = 1
-
-    @staticmethod
-    def peek_byte_data_shard(filename: str) -> int:
-        with open(filename, "rb") as f:
-            header = np.frombuffer(f.read(ByteDataShard.HEADER_SIZE), dtype=np.int32)
-
-        if header[0] != ByteDataShard.MAGIC_NUMBER:
-            print_rank0("ERROR: magic number mismatch in the byte data .bin file!")
-            print_rank0("---> HINT: Are you passing in a correct byte-level data file?")
-            print_rank0("---> HINT: For byte-level training, use fineweb_bytes.py to generate data")
-            exit(1)
-        assert header[1] == ByteDataShard.VERSION, "Unsupported version"
-        return header[2]
-
-    @staticmethod
-    def load_byte_data_shard(filename: str) -> np.ndarray:
-        with open(filename, "rb") as f:
-            header = np.frombuffer(f.read(ByteDataShard.HEADER_SIZE), dtype=np.int32)
-            assert header[0] == ByteDataShard.MAGIC_NUMBER, "Magic number mismatch"
-            assert header[1] == ByteDataShard.VERSION, "Unsupported version"
-            nbytes = header[2]
-            bytes_data = np.frombuffer(f.read(), dtype=np.uint8)
-
-        assert len(bytes_data) == nbytes, "Byte count mismatch"
-        return bytes_data
-
-
-
-
-class DistributedDataLoader:
-    """Distributed data loader for handling multiple data shards."""
-
-    def __init__(
-        self,
-        filename_pattern: str,
-        batch_size: int,
-        seq_length: int,
-        process_rank: int,
-        num_processes: int,
-        byte_level_training: bool = False,
-    ):
-        self.process_rank = process_rank
-        self.num_processes = num_processes
-        self.batch_size = batch_size
-        self.seq_length = seq_length
-        self.byte_level_training = byte_level_training
-
-        self.files = sorted(glob.glob(filename_pattern))
-        if not self.files:
-            raise ValueError(f"No files found matching pattern: {filename_pattern}")
-
-        self.ntok_total = self._validate_shards()
-        self.reset()
-
-    def _load_shard_data(self, filename: str) -> np.ndarray:
-        """Load data from a shard file based on training mode and file type."""
-        if self.byte_level_training:
-            if filename.endswith('.bin'):
-                return ByteDataShard.load_byte_data_shard(filename)
-            else:
-                raise ValueError(f"Byte-level training only supports .bin files, got: {filename}")
-        else:
-            return DataShard.load_data_shard(filename)
-
-    def _get_shard_size(self, filename: str) -> int:
-        """Get the size of a shard file based on training mode and file type."""
-        if self.byte_level_training:
-            if filename.endswith('.bin'):
-                return ByteDataShard.peek_byte_data_shard(filename)
-            else:
-                raise ValueError(f"Byte-level training only supports .bin files, got: {filename}")
-        else:
-            return DataShard.peek_data_shard(filename)
-
-    def _validate_shards(self) -> int:
-        ntok_total = 0
-        min_required = self.num_processes * self.batch_size * self.seq_length + 1
-
-        for fname in self.files:
-            shard_ntok = self._get_shard_size(fname)
-            assert shard_ntok >= min_required, f"Shard {fname} too small"
-            ntok_total += int(shard_ntok)
-        return ntok_total
-
-    def reset(self):
-        self.current_shard = 0
-        self.current_position = self.process_rank * self.batch_size * self.seq_length
-        self.tokens = self._load_shard_data(self.files[self.current_shard])
-
-    def advance(self):
-        self.current_shard = (self.current_shard + 1) % len(self.files)
-        self.current_position = self.process_rank * self.batch_size * self.seq_length
-        self.tokens = self._load_shard_data(self.files[self.current_shard])
-
-    def next_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        B, T = self.batch_size, self.seq_length
-        buf = self.tokens[self.current_position : self.current_position + B * T + 1]
-
-        # Convert to tensor - both bytes and tokens need to be long for model input
-        buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
-
-        x = (buf[:-1]).view(B, T)
-        y = (buf[1:]).view(B, T)
-
-        # For debugging: print max value to check data range
-        if self.byte_level_training:
-            assert x.max().item() < 256, f"Byte value out of range: {x.max().item()}"
-        # print(x.max().item())
-
-        self.current_position += B * T * self.num_processes
-        if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
-            self.advance()
-
-        return x.cuda(), y.cuda()
-
-
 class Trainer:
     """Main trainer class handling the training loop and validation."""
 
@@ -345,8 +231,7 @@ class Trainer:
 
     def setup_model(self, model_name: str, config_path: Optional[str]):
         """Initialize model and move to GPU."""
-        model_config, model_cls = get_model(model_name)
-        self.model_config = model_config()
+        self.model_config, model_cls = get_model(model_name)
 
         if config_path:
             self.model_config.load_json(config_path)
@@ -419,75 +304,12 @@ class Trainer:
 
     def setup_data_loaders(self):
         """Initialize training and validation data loaders."""
-        if self.args.byte_level_training:
-            if self.is_master:
-                print_rank0("Setting up byte-level training data loaders...")
-
-            # Try binary byte shards first, fallback to text shards
-            train_pattern = os.path.join(self.args.byte_data_dir, "fineweb_train_*.bin")
-            val_pattern = os.path.join(self.args.byte_data_dir, "fineweb_val_*.bin")
-
-            # Check if binary files exist
-            train_files = glob.glob(train_pattern)
-            val_files = glob.glob(val_pattern)
-
-            if not train_files:
-                raise ValueError(f"No byte-level training files found at {train_pattern}. "
-                               f"Please generate byte data using fineweb_bytes.py first.")
-
-            # If validation files don't exist, use a subset of training files
-            if not val_files:
-                if self.is_master:
-                    print_rank0(f"No validation files found at {val_pattern}")
-                    print_rank0("Using training files for validation...")
-                val_pattern = train_pattern
-
-            if self.is_master:
-                print_rank0(f"Using binary files for byte-level training")
-                print_rank0(f"Training files: {len(glob.glob(train_pattern))}")
-                print_rank0(f"Validation files: {len(glob.glob(val_pattern))}")
+        if self.args.use_hf_streaming:
+            self._setup_hf_streaming_loaders()
+        elif self.args.byte_level_training:
+            self._setup_byte_level_loaders()
         else:
-            train_pattern = self.args.input_bin
-            val_pattern = self.args.input_val_bin
-
-            if self.is_master:
-                print_rank0("Setting up BPE token-level training data loaders...")
-                print_rank0(f"Training pattern: {train_pattern}")
-                print_rank0(f"Validation pattern: {val_pattern}")
-
-        try:
-            self.train_loader = DistributedDataLoader(
-                train_pattern,
-                self.args.device_batch_size,
-                self.args.sequence_length,
-                self.rank,
-                self.world_size,
-                self.args.byte_level_training,
-            )
-
-            self.val_loader = DistributedDataLoader(
-                val_pattern,
-                self.args.device_batch_size,
-                self.args.sequence_length,
-                self.rank,
-                self.world_size,
-                self.args.byte_level_training,
-            )
-        except Exception as e:
-            if self.is_master:
-                print_rank0(f"Error setting up data loaders: {e}")
-                print_rank0("\nTroubleshooting:")
-                if self.args.byte_level_training:
-                    print_rank0("For byte-level training:")
-                    print_rank0(f"- Ensure byte data directory exists: {self.args.byte_data_dir}")
-                    print_rank0("- Run: cd ../data && python fineweb_bytes.py --version 10B")
-                    print_rank0("- Check that .bin files are present in the byte_data_dir")
-                else:
-                    print_rank0("For BPE token training:")
-                    print_rank0(f"- Check input_bin path: {self.args.input_bin}")
-                    print_rank0(f"- Check input_val_bin path: {self.args.input_val_bin}")
-                    print_rank0("- Run: cd ../data && python fineweb.py --version 10B")
-            raise
+            self._setup_binary_shard_loaders()
 
         self.train_accumulation_steps = self.args.batch_size // (
             self.args.device_batch_size * self.world_size
@@ -499,11 +321,170 @@ class Trainer:
 
         if self.is_master:
             print_rank0(f"Data loader setup complete:")
-            print_rank0(f"  Total training tokens: {self.train_loader.ntok_total:,}")
-            print_rank0(f"  Total validation tokens: {self.val_loader.ntok_total:,}")
             print_rank0(f"  Training accumulation steps: {self.train_accumulation_steps}")
             print_rank0(f"  Validation steps: {self.val_steps}")
-            if self.args.byte_level_training:
+
+    def _setup_hf_streaming_loaders(self):
+        """Set up HuggingFace streaming data loaders."""
+        if self.is_master:
+            print_rank0("Setting up HuggingFace streaming data loaders...")
+            print_rank0(f"  Dataset: {self.args.hf_dataset}")
+            print_rank0(f"  Config: {self.args.hf_dataset_config}")
+            print_rank0(f"  Text column: {self.args.hf_text_column}")
+
+        # Initialize tokenizer
+        tokenizer_config = TokenizerConfig(
+            backend=self.args.tokenizer_backend,
+            name=self.args.tokenizer_name,
+        )
+        self.tokenizer = TokenizerWrapper(tokenizer_config)
+
+        if self.is_master:
+            print_rank0(f"  Tokenizer: {self.tokenizer}")
+
+        # Validate vocab size against model config
+        model_vocab_size = getattr(self.model_config, 'vocab_size', None)
+        if model_vocab_size and model_vocab_size != self.tokenizer.vocab_size:
+            if self.is_master:
+                print_rank0(
+                    f"  WARNING: Model vocab_size ({model_vocab_size}) != tokenizer vocab_size ({self.tokenizer.vocab_size})"
+                )
+
+        # Training dataset config
+        train_config = HFDatasetConfig(
+            dataset_name=self.args.hf_dataset,
+            dataset_config=self.args.hf_dataset_config,
+            split="train",
+            text_column=self.args.hf_text_column,
+            shuffle_buffer_size=self.args.hf_shuffle_buffer,
+            seed=42,
+        )
+
+        # Validation dataset config
+        val_dataset = self.args.hf_val_dataset or self.args.hf_dataset
+        val_config_name = self.args.hf_val_dataset_config or self.args.hf_dataset_config
+
+        val_config = HFDatasetConfig(
+            dataset_name=val_dataset,
+            dataset_config=val_config_name,
+            split="train",  # Many datasets don't have a val split
+            text_column=self.args.hf_text_column,
+            shuffle_buffer_size=1000,  # Smaller buffer for validation
+            seed=123,  # Different seed for validation
+        )
+
+        try:
+            self.train_loader = HFStreamingDataLoader(
+                train_config,
+                self.tokenizer,
+                self.args.device_batch_size,
+                self.args.sequence_length,
+                self.rank,
+                self.world_size,
+            )
+
+            self.val_loader = HFStreamingDataLoader(
+                val_config,
+                self.tokenizer,
+                self.args.device_batch_size,
+                self.args.sequence_length,
+                self.rank,
+                self.world_size,
+            )
+        except Exception as e:
+            if self.is_master:
+                print_rank0(f"Error setting up HF streaming loaders: {e}")
+                print_rank0("\nTroubleshooting:")
+                print_rank0(f"- Check dataset name: {self.args.hf_dataset}")
+                print_rank0(f"- Check dataset config: {self.args.hf_dataset_config}")
+                print_rank0(f"- Check text column: {self.args.hf_text_column}")
+                print_rank0("- Ensure you have internet access for streaming")
+            raise
+
+        if self.is_master:
+            print_rank0(f"  HF streaming loaders initialized successfully")
+
+    def _setup_byte_level_loaders(self):
+        """Set up byte-level binary shard data loaders."""
+        if self.is_master:
+            print_rank0("Setting up byte-level training data loaders...")
+
+        train_pattern = os.path.join(self.args.byte_data_dir, "fineweb_train_*.bin")
+        val_pattern = os.path.join(self.args.byte_data_dir, "fineweb_val_*.bin")
+
+        train_files = glob.glob(train_pattern)
+        val_files = glob.glob(val_pattern)
+
+        if not train_files:
+            raise ValueError(
+                f"No byte-level training files found at {train_pattern}. "
+                f"Please generate byte data using fineweb_bytes.py first."
+            )
+
+        if not val_files:
+            if self.is_master:
+                print_rank0(f"No validation files found at {val_pattern}")
+                print_rank0("Using training files for validation...")
+            val_pattern = train_pattern
+
+        if self.is_master:
+            print_rank0(f"Using binary files for byte-level training")
+            print_rank0(f"Training files: {len(glob.glob(train_pattern))}")
+            print_rank0(f"Validation files: {len(glob.glob(val_pattern))}")
+
+        self._create_distributed_loaders(train_pattern, val_pattern, byte_level=True)
+
+    def _setup_binary_shard_loaders(self):
+        """Set up BPE token binary shard data loaders."""
+        train_pattern = self.args.input_bin
+        val_pattern = self.args.input_val_bin
+
+        if self.is_master:
+            print_rank0("Setting up BPE token-level training data loaders...")
+            print_rank0(f"Training pattern: {train_pattern}")
+            print_rank0(f"Validation pattern: {val_pattern}")
+
+        self._create_distributed_loaders(train_pattern, val_pattern, byte_level=False)
+
+    def _create_distributed_loaders(self, train_pattern: str, val_pattern: str, byte_level: bool):
+        """Create distributed data loaders from file patterns."""
+        try:
+            self.train_loader = DistributedDataLoader(
+                train_pattern,
+                self.args.device_batch_size,
+                self.args.sequence_length,
+                self.rank,
+                self.world_size,
+                byte_level,
+            )
+
+            self.val_loader = DistributedDataLoader(
+                val_pattern,
+                self.args.device_batch_size,
+                self.args.sequence_length,
+                self.rank,
+                self.world_size,
+                byte_level,
+            )
+        except Exception as e:
+            if self.is_master:
+                print_rank0(f"Error setting up data loaders: {e}")
+                print_rank0("\nTroubleshooting:")
+                if byte_level:
+                    print_rank0("For byte-level training:")
+                    print_rank0(f"- Ensure byte data directory exists: {self.args.byte_data_dir}")
+                    print_rank0("- Run: cd ../data && python fineweb_bytes.py --version 10B")
+                else:
+                    print_rank0("For BPE token training:")
+                    print_rank0(f"- Check input_bin path: {self.args.input_bin}")
+                    print_rank0(f"- Check input_val_bin path: {self.args.input_val_bin}")
+                    print_rank0("- Run: cd ../data && python fineweb.py --version 10B")
+            raise
+
+        if self.is_master:
+            print_rank0(f"  Total training tokens: {self.train_loader.ntok_total:,}")
+            print_rank0(f"  Total validation tokens: {self.val_loader.ntok_total:,}")
+            if byte_level:
                 print_rank0(f"  Vocabulary size: 256 (byte-level)")
             else:
                 print_rank0(f"  Vocabulary size: {getattr(self.model_config, 'vocab_size', 'Unknown')}")
@@ -556,10 +537,20 @@ class Trainer:
         print_rank0(f"Model parameters: {total_formatted} total ({total_params:,}), {trainable_formatted} trainable ({trainable_params:,})")
 
         print_rank0("=" * 100)
-        print_rank0(f"Byte-level training: {'Enabled' if self.args.byte_level_training else 'Disabled'}")
-        if self.args.byte_level_training:
-            print_rank0(f"Text data directory: {self.args.text_data_dir}")
-            print_rank0(f"Vocab size: 256 (bytes)")
+        if self.args.use_hf_streaming:
+            print_rank0("Data mode: HuggingFace Streaming")
+            print_rank0(f"  Dataset: {self.args.hf_dataset} ({self.args.hf_dataset_config})")
+            print_rank0(f"  Tokenizer: {self.args.tokenizer_backend}/{self.args.tokenizer_name}")
+            if hasattr(self, 'tokenizer'):
+                print_rank0(f"  Vocab size: {self.tokenizer.vocab_size}")
+        elif self.args.byte_level_training:
+            print_rank0("Data mode: Byte-level (binary shards)")
+            print_rank0(f"  Data directory: {self.args.byte_data_dir}")
+            print_rank0(f"  Vocab size: 256 (bytes)")
+        else:
+            print_rank0("Data mode: BPE tokens (binary shards)")
+            print_rank0(f"  Train pattern: {self.args.input_bin}")
+            print_rank0(f"  Vocab size: {getattr(self.model_config, 'vocab_size', 'Unknown')}")
         print_rank0("=" * 100)
 
     def validate(self) -> float:
