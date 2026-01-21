@@ -13,6 +13,7 @@ from typing import Iterator, List, Optional, Tuple
 
 import numpy as np
 import torch
+from coqpit import Coqpit
 
 try:
     import torch.distributed as dist
@@ -193,7 +194,7 @@ class DistributedDataLoader:
 
 
 @dataclass
-class HFDatasetConfig:
+class HFDatasetConfig(Coqpit):
     """Configuration for HuggingFace streaming datasets."""
 
     dataset_name: str = "HuggingFaceFW/fineweb"
@@ -203,6 +204,10 @@ class HFDatasetConfig:
     streaming: bool = True
     shuffle_buffer_size: int = 10000
     seed: int = 42
+    # For streaming datasets: skip first N samples (use for training to skip val samples)
+    skip_samples: int = 0
+    # For streaming datasets: take only first N samples (use for validation)
+    take_samples: Optional[int] = None
 
 
 class HFStreamingDataLoader:
@@ -239,6 +244,13 @@ class HFStreamingDataLoader:
     def _init_dataset(self):
         """Initialize the HuggingFace dataset."""
         from datasets import load_dataset
+        from datasets.distributed import split_dataset_by_node
+
+        # Disable progress bars on non-rank-0 processes to avoid cluttered output
+        if self.process_rank != 0:
+            from datasets import disable_progress_bar
+
+            disable_progress_bar()
 
         try:
             self._dataset = load_dataset(
@@ -253,10 +265,21 @@ class HFStreamingDataLoader:
                 f"with config '{self.config.dataset_config}': {e}"
             )
 
+        # Apply take/skip for train/val splitting (streaming datasets don't support slice syntax)
+        # For validation: take first N samples
+        if self.config.take_samples is not None:
+            self._dataset = self._dataset.take(self.config.take_samples)
+        # For training: skip first N samples (those used for validation)
+        if self.config.skip_samples > 0:
+            self._dataset = self._dataset.skip(self.config.skip_samples)
+
         # Shard across processes for distributed training
+        # For IterableDataset (streaming), use split_dataset_by_node
         if self.num_processes > 1:
-            self._dataset = self._dataset.shard(
-                num_shards=self.num_processes, index=self.process_rank
+            self._dataset = split_dataset_by_node(
+                self._dataset,
+                rank=self.process_rank,
+                world_size=self.num_processes,
             )
 
         # Shuffle with buffer
