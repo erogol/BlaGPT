@@ -2,10 +2,12 @@
 
 import sys
 import os
+import tempfile
 
 # Add bla_gpt to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'bla_gpt'))
 
+import numpy as np
 import pytest
 import torch
 from data_loaders import (
@@ -13,8 +15,9 @@ from data_loaders import (
     ByteDataShard,
     HFDatasetConfig,
     HFStreamingDataLoader,
+    generate_cache_key,
 )
-from tokenizers_config import TokenizerWrapper, TokenizerConfig
+from tokenizers_config import TokenizerWrapper
 
 
 class TestDataShard:
@@ -53,6 +56,15 @@ class TestHFDatasetConfig:
         assert config.shuffle_buffer_size == 10000
         assert config.seed == 42
 
+    def test_is_coqpit_subclass(self):
+        """Verify HFDatasetConfig inherits from Coqpit."""
+        from coqpit import Coqpit
+        config = HFDatasetConfig()
+        assert isinstance(config, Coqpit)
+        # Verify Coqpit methods are available
+        assert hasattr(config, 'to_dict')
+        assert hasattr(config, 'from_dict')
+
     def test_custom_config(self):
         config = HFDatasetConfig(
             dataset_name="allenai/c4",
@@ -87,7 +99,7 @@ class TestHFStreamingDataLoaderMock:
 
     @pytest.fixture
     def tokenizer(self):
-        return TokenizerWrapper(TokenizerConfig())
+        return TokenizerWrapper()
 
     @pytest.fixture
     def loader_with_mock(self, mock_dataset, tokenizer, monkeypatch):
@@ -150,7 +162,7 @@ class TestHFStreamingDataLoaderReal:
 
     @pytest.fixture
     def tokenizer(self):
-        return TokenizerWrapper(TokenizerConfig())
+        return TokenizerWrapper()
 
     @pytest.fixture
     def loader(self, tokenizer):
@@ -181,3 +193,148 @@ class TestHFStreamingDataLoaderReal:
         decoded = tokenizer.decode(sample)
         assert isinstance(decoded, str)
         assert len(decoded) > 0
+
+
+class TestGenerateCacheKey:
+    """Tests for generate_cache_key function."""
+
+    def test_deterministic(self):
+        """Same config produces same key."""
+        config = HFDatasetConfig(
+            dataset_name="test/dataset",
+            dataset_config="config1",
+            split="train",
+            take_samples=1000,
+        )
+        key1 = generate_cache_key(config, "tiktoken", "gpt2")
+        key2 = generate_cache_key(config, "tiktoken", "gpt2")
+        assert key1 == key2
+
+    def test_different_dataset_produces_different_key(self):
+        """Different dataset names produce different keys."""
+        config1 = HFDatasetConfig(dataset_name="test/dataset1")
+        config2 = HFDatasetConfig(dataset_name="test/dataset2")
+        key1 = generate_cache_key(config1, "tiktoken", "gpt2")
+        key2 = generate_cache_key(config2, "tiktoken", "gpt2")
+        assert key1 != key2
+
+    def test_different_config_produces_different_key(self):
+        """Different dataset configs produce different keys."""
+        config1 = HFDatasetConfig(dataset_config="config1")
+        config2 = HFDatasetConfig(dataset_config="config2")
+        key1 = generate_cache_key(config1, "tiktoken", "gpt2")
+        key2 = generate_cache_key(config2, "tiktoken", "gpt2")
+        assert key1 != key2
+
+    def test_different_samples_produces_different_key(self):
+        """Different take_samples produces different keys."""
+        config1 = HFDatasetConfig(take_samples=500)
+        config2 = HFDatasetConfig(take_samples=1000)
+        key1 = generate_cache_key(config1, "tiktoken", "gpt2")
+        key2 = generate_cache_key(config2, "tiktoken", "gpt2")
+        assert key1 != key2
+
+    def test_different_tokenizer_produces_different_key(self):
+        """Different tokenizer produces different keys."""
+        config = HFDatasetConfig()
+        key1 = generate_cache_key(config, "tiktoken", "gpt2")
+        key2 = generate_cache_key(config, "huggingface", "gpt2")
+        assert key1 != key2
+
+    def test_different_tokenizer_name_produces_different_key(self):
+        """Different tokenizer name produces different keys."""
+        config = HFDatasetConfig()
+        key1 = generate_cache_key(config, "tiktoken", "gpt2")
+        key2 = generate_cache_key(config, "tiktoken", "cl100k_base")
+        assert key1 != key2
+
+    def test_key_length(self):
+        """Key is 16 hex characters."""
+        config = HFDatasetConfig()
+        key = generate_cache_key(config, "tiktoken", "gpt2")
+        assert len(key) == 16
+        assert all(c in "0123456789abcdef" for c in key)
+
+    def test_none_config_handled(self):
+        """None dataset_config is handled (uses 'default')."""
+        config = HFDatasetConfig(dataset_config=None)
+        key = generate_cache_key(config, "tiktoken", "gpt2")
+        assert len(key) == 16
+
+    def test_none_take_samples_handled(self):
+        """None take_samples is handled (uses 'all')."""
+        config = HFDatasetConfig(take_samples=None)
+        key = generate_cache_key(config, "tiktoken", "gpt2")
+        assert len(key) == 16
+
+
+class TestCacheWriteLoad:
+    """Tests for cache write/load functionality."""
+
+    def test_datashard_format_roundtrip(self):
+        """Test writing and loading tokens in DataShard format."""
+        # Create test tokens
+        tokens = np.array([100, 200, 300, 400, 500], dtype=np.uint16)
+
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+            cache_path = f.name
+
+        try:
+            # Write in DataShard format
+            header = np.zeros(256, dtype=np.int32)
+            header[0] = DataShard.MAGIC_NUMBER
+            header[1] = DataShard.VERSION
+            header[2] = len(tokens)
+
+            with open(cache_path, "wb") as f:
+                f.write(header.tobytes())
+                f.write(tokens.tobytes())
+
+            # Load back using DataShard
+            loaded_tokens = DataShard.load_data_shard(cache_path)
+            assert len(loaded_tokens) == len(tokens)
+            assert np.array_equal(loaded_tokens, tokens)
+        finally:
+            os.unlink(cache_path)
+
+    def test_large_token_roundtrip(self):
+        """Test with a larger number of tokens."""
+        tokens = np.arange(10000, dtype=np.uint16)
+
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+            cache_path = f.name
+
+        try:
+            header = np.zeros(256, dtype=np.int32)
+            header[0] = DataShard.MAGIC_NUMBER
+            header[1] = DataShard.VERSION
+            header[2] = len(tokens)
+
+            with open(cache_path, "wb") as f:
+                f.write(header.tobytes())
+                f.write(tokens.tobytes())
+
+            loaded_tokens = DataShard.load_data_shard(cache_path)
+            assert len(loaded_tokens) == 10000
+            assert np.array_equal(loaded_tokens, tokens)
+        finally:
+            os.unlink(cache_path)
+
+
+class TestHFDatasetConfigCacheFields:
+    """Tests for HFDatasetConfig cache-related fields."""
+
+    def test_cache_fields_default(self):
+        """Test default values for cache fields."""
+        config = HFDatasetConfig()
+        assert config.cache_tokens == False
+        assert config.cache_dir is None
+
+    def test_cache_fields_custom(self):
+        """Test custom values for cache fields."""
+        config = HFDatasetConfig(
+            cache_tokens=True,
+            cache_dir="/tmp/my_cache",
+        )
+        assert config.cache_tokens == True
+        assert config.cache_dir == "/tmp/my_cache"

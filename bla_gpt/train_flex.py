@@ -23,6 +23,7 @@ from data_loaders import (
     DistributedDataLoader,
     HFStreamingDataLoader,
     HFDatasetConfig,
+    CachedHFValidationLoader,
     print_rank0,
 )
 from tokenizers_config import TokenizerWrapper
@@ -104,6 +105,14 @@ class Hyperparameters(Coqpit):
     hf_shuffle_buffer: int = field(
         default=10000,
         metadata={"help": "Shuffle buffer size for streaming datasets"}
+    )
+    hf_cache_val_tokens: bool = field(
+        default=False,
+        metadata={"help": "Cache tokenized validation data locally to avoid redundant fetches"}
+    )
+    hf_val_cache_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Directory for validation token cache (default: data/hf_cache)"}
     )
     # Tokenizer configuration
     tokenizer_backend: str = field(
@@ -388,6 +397,9 @@ class Trainer:
             seed=42,
             # Take only N samples if using same source
             take_samples=self.args.hf_val_samples if same_source else None,
+            # Caching options
+            cache_tokens=self.args.hf_cache_val_tokens,
+            cache_dir=self.args.hf_val_cache_dir,
         )
 
         try:
@@ -400,14 +412,27 @@ class Trainer:
                 self.world_size,
             )
 
-            self.val_loader = HFStreamingDataLoader(
-                val_config,
-                self.tokenizer,
-                self.args.device_batch_size,
-                self.args.sequence_length,
-                self.rank,
-                self.world_size,
-            )
+            # Use cached loader for validation when caching is enabled
+            if self.args.hf_cache_val_tokens:
+                self.val_loader = CachedHFValidationLoader(
+                    val_config,
+                    self.tokenizer,
+                    self.args.device_batch_size,
+                    self.args.sequence_length,
+                    self.rank,
+                    self.world_size,
+                    self.args.tokenizer_backend,
+                    self.args.tokenizer_name,
+                )
+            else:
+                self.val_loader = HFStreamingDataLoader(
+                    val_config,
+                    self.tokenizer,
+                    self.args.device_batch_size,
+                    self.args.sequence_length,
+                    self.rank,
+                    self.world_size,
+                )
         except Exception as e:
             if self.is_master:
                 print_rank0(f"Error setting up HF streaming loaders: {e}")
@@ -424,6 +449,8 @@ class Trainer:
                 print_rank0(f"  Train/val split: first {self.args.hf_val_samples} samples → validation, rest → training")
             else:
                 print_rank0(f"  Using separate validation source: {val_dataset}/{val_config_name} split={self.args.hf_val_split}")
+            if self.args.hf_cache_val_tokens:
+                print_rank0(f"  Validation caching: enabled (dir: {self.args.hf_val_cache_dir or 'data/hf_cache'})")
 
     def _setup_byte_level_loaders(self):
         """Set up byte-level binary shard data loaders."""
@@ -806,6 +833,9 @@ def main():
         elif field_type == float:
             parser.add_argument(f"--{field_name}", type=float, default=default_value,
                               help=help_text)
+        elif field_type == Optional[str]:
+            parser.add_argument(f"--{field_name}", type=str, default=default_value,
+                              help=help_text)
         else:
             # For other types, try to infer from default value
             if isinstance(default_value, bool):
@@ -819,6 +849,10 @@ def main():
                                   help=help_text)
             elif isinstance(default_value, float):
                 parser.add_argument(f"--{field_name}", type=float, default=default_value,
+                                  help=help_text)
+            elif default_value is None:
+                # Handle Optional types with None default (treat as optional string)
+                parser.add_argument(f"--{field_name}", type=str, default=None,
                                   help=help_text)
 
     args = parser.parse_args()

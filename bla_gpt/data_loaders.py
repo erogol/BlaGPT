@@ -8,6 +8,8 @@ Supports:
 """
 
 import glob
+import hashlib
+import os
 from dataclasses import dataclass, field
 from typing import Iterator, List, Optional, Tuple
 
@@ -208,6 +210,28 @@ class HFDatasetConfig(Coqpit):
     skip_samples: int = 0
     # For streaming datasets: take only first N samples (use for validation)
     take_samples: Optional[int] = None
+    # Caching options for validation data
+    cache_tokens: bool = False
+    cache_dir: Optional[str] = None
+
+
+def generate_cache_key(
+    config: HFDatasetConfig, tokenizer_backend: str, tokenizer_name: str
+) -> str:
+    """Generate a deterministic cache key based on dataset and tokenizer config.
+
+    The key includes all parameters that would affect the cached token output,
+    ensuring different configurations produce different cache files.
+    """
+    key_parts = [
+        config.dataset_name,
+        config.dataset_config or "default",
+        config.split,
+        str(config.take_samples or "all"),
+        tokenizer_backend,
+        tokenizer_name,
+    ]
+    return hashlib.sha256("_".join(key_parts).encode()).hexdigest()[:16]
 
 
 class HFStreamingDataLoader:
@@ -334,5 +358,159 @@ class HFStreamingDataLoader:
 
         # Track tokens seen
         self.ntok_total += B * T
+
+        return x.cuda(), y.cuda()
+
+
+class CachedHFValidationLoader:
+    """Cached data loader for HuggingFace streaming validation datasets.
+
+    Caches tokenized validation data to disk on first run.
+    Subsequent validations load directly from cache, avoiding
+    redundant network fetches and tokenization.
+    """
+
+    def __init__(
+        self,
+        config: HFDatasetConfig,
+        tokenizer,  # TokenizerWrapper
+        batch_size: int,
+        seq_length: int,
+        process_rank: int,
+        num_processes: int,
+        tokenizer_backend: str = "tiktoken",
+        tokenizer_name: str = "gpt2",
+    ):
+        self.config = config
+        self.tokenizer = tokenizer
+        self.batch_size = batch_size
+        self.seq_length = seq_length
+        self.process_rank = process_rank
+        self.num_processes = num_processes
+
+        # Generate cache key and path
+        self.cache_key = generate_cache_key(config, tokenizer_backend, tokenizer_name)
+        cache_dir = config.cache_dir or "data/hf_cache"
+        self.cache_path = os.path.join(cache_dir, f"hf_val_cache_{self.cache_key}.bin")
+
+        # Token storage
+        self._tokens: Optional[np.ndarray] = None
+        self._current_position = 0
+        self.ntok_total = 0
+
+        # Load or create cache
+        self._init_cache()
+
+    def _init_cache(self):
+        """Initialize cache: load existing or create new."""
+        if os.path.exists(self.cache_path):
+            self._load_from_cache()
+        else:
+            self._create_cache()
+
+    def _load_from_cache(self):
+        """Load cached tokens from disk."""
+        self._tokens = DataShard.load_data_shard(self.cache_path)
+        self.ntok_total = len(self._tokens)
+        print_rank0(f"Loaded {self.ntok_total:,} validation tokens from cache: {self.cache_path}")
+
+    def _create_cache(self):
+        """Create cache by tokenizing validation data."""
+        # Only rank 0 creates the cache
+        if self.process_rank == 0:
+            print_rank0(f"Creating validation token cache: {self.cache_path}")
+            self._fetch_and_cache_tokens()
+
+        # Synchronize across ranks
+        if dist is not None and dist.is_initialized():
+            dist.barrier()
+
+        # All ranks load from cache
+        if self.process_rank != 0:
+            self._load_from_cache()
+
+    def _fetch_and_cache_tokens(self):
+        """Fetch all validation samples, tokenize, and write to cache."""
+        from datasets import load_dataset
+
+        # Load dataset (streaming)
+        dataset = load_dataset(
+            self.config.dataset_name,
+            self.config.dataset_config,
+            split=self.config.split,
+            streaming=True,
+        )
+
+        # Take only N samples for validation
+        if self.config.take_samples is not None:
+            dataset = dataset.take(self.config.take_samples)
+
+        # Tokenize all samples
+        all_tokens: List[int] = []
+        eos_id = self.tokenizer.eos_token_id
+        sample_count = 0
+
+        for example in dataset:
+            text = example.get(self.config.text_column, "")
+            if not text:
+                continue
+
+            tokens = self.tokenizer.encode(text)
+            tokens.append(eos_id)
+            all_tokens.extend(tokens)
+            sample_count += 1
+
+            if sample_count % 100 == 0:
+                print_rank0(f"  Tokenized {sample_count} samples, {len(all_tokens):,} tokens...")
+
+        print_rank0(f"  Completed: {sample_count} samples, {len(all_tokens):,} tokens")
+
+        # Convert to numpy array
+        self._tokens = np.array(all_tokens, dtype=np.uint16)
+        self.ntok_total = len(self._tokens)
+
+        # Write to cache file
+        self._write_cache()
+
+    def _write_cache(self):
+        """Write cached tokens to disk in DataShard format."""
+        cache_dir = os.path.dirname(self.cache_path)
+        if cache_dir:
+            os.makedirs(cache_dir, exist_ok=True)
+
+        # Create header (same format as DataShard)
+        header = np.zeros(256, dtype=np.int32)
+        header[0] = DataShard.MAGIC_NUMBER
+        header[1] = DataShard.VERSION
+        header[2] = len(self._tokens)
+
+        with open(self.cache_path, "wb") as f:
+            f.write(header.tobytes())
+            f.write(self._tokens.tobytes())
+
+        print_rank0(f"  Cache written to: {self.cache_path}")
+
+    def reset(self):
+        """Reset the data loader to the beginning."""
+        self._current_position = self.process_rank * self.batch_size * self.seq_length
+
+    def next_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get next batch of (input, target) tensors."""
+        B, T = self.batch_size, self.seq_length
+        needed_tokens = B * T + 1
+
+        # Handle wrap-around if we reach end of tokens
+        if self._current_position + needed_tokens > len(self._tokens):
+            self._current_position = self.process_rank * self.batch_size * self.seq_length
+
+        # Extract tokens for this batch
+        buf = self._tokens[self._current_position : self._current_position + needed_tokens]
+        buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
+
+        x = buf[:-1].view(B, T)
+        y = buf[1:].view(B, T)
+
+        # Advance position (stride by all processes' worth)
+        self._current_position += B * T * self.num_processes
 
         return x.cuda(), y.cuda()
