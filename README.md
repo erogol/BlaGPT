@@ -148,18 +148,103 @@ See one of the implementations for details.
 
 ## Training
 
-- Get the data by running `data/fineweb10B_cached.py`
+BlaGPT provides two training scripts:
 
-- Start training with:
+| Script | Purpose | Data Sources |
+|--------|---------|--------------|
+| `train.py` | Quick experimentation with pre-tokenized data | Binary shards only |
+| `train_flex.py` | Flexible training with custom datasets/tokenizers | Binary shards, HF streaming, byte-level |
+
+### Quick Start (train.py)
+
+For rapid architecture benchmarking with the default FineWeb10B dataset:
 
 ```bash
-torchrun --standalone --nproc_per_node=8 train.py --run_name pre_post_norm --model_name blagpt
+# Get the pre-tokenized data
+python data/fineweb10B_cached.py
+
+# Start training
+torchrun --standalone --nproc_per_node=8 bla_gpt/train.py --run_name my_experiment --model_name blagpt
 ```
 
-- (Optional) Run the learning rate finder before the training
+### Flexible Training (train_flex.py)
+
+For custom datasets, different tokenizers, or HuggingFace streaming:
+
+#### Using Pre-tokenized Binary Shards (Default)
 
 ```bash
-torchrun --standalone --nproc_per_node=8 find_lr.py --model_name blagpt
+torchrun --standalone --nproc_per_node=8 bla_gpt/train_flex.py \
+    --model_name blagpt \
+    --run_name my_experiment
+```
+
+#### Using HuggingFace Streaming Datasets
+
+Stream data directly from HuggingFace Hub - no pre-download required:
+
+```bash
+# FineWeb with GPT-2 tokenizer (tiktoken)
+torchrun --standalone --nproc_per_node=8 bla_gpt/train_flex.py \
+    --model_name blagpt \
+    --run_name hf_streaming_test \
+    --use_hf_streaming \
+    --hf_dataset "HuggingFaceFW/fineweb" \
+    --hf_dataset_config "sample-10BT"
+
+# C4 dataset with HuggingFace tokenizer
+torchrun --standalone --nproc_per_node=8 bla_gpt/train_flex.py \
+    --model_name blagpt \
+    --run_name c4_experiment \
+    --use_hf_streaming \
+    --hf_dataset "allenai/c4" \
+    --hf_dataset_config "en" \
+    --tokenizer_backend huggingface \
+    --tokenizer_name "gpt2"
+
+# Custom dataset with custom text column
+torchrun --standalone --nproc_per_node=8 bla_gpt/train_flex.py \
+    --model_name blagpt \
+    --run_name custom_data \
+    --use_hf_streaming \
+    --hf_dataset "username/my-dataset" \
+    --hf_text_column "content"
+```
+
+#### Dataset Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--use_hf_streaming` | `False` | Enable HuggingFace streaming mode |
+| `--hf_dataset` | `HuggingFaceFW/fineweb` | HuggingFace dataset name or path |
+| `--hf_dataset_config` | `sample-10BT` | Dataset configuration/subset |
+| `--hf_split` | `train` | Training split name |
+| `--hf_text_column` | `text` | Column containing text data |
+| `--hf_val_dataset` | Same as train | Separate validation dataset (optional) |
+| `--hf_val_dataset_config` | Same as train | Validation dataset config |
+| `--hf_val_split` | `train` | Validation split name |
+| `--hf_val_samples` | `1000` | Number of samples for validation (first N of val split) |
+| `--hf_shuffle_buffer` | `10000` | Shuffle buffer size for streaming |
+
+**Train/Validation Split:** By default, the first 1000 samples are used for validation and training skips these samples (no overlap). When using a separate validation dataset or split, this behavior is automatically disabled.
+
+#### Tokenizer Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--tokenizer_backend` | `tiktoken` | Backend: `tiktoken` or `huggingface` |
+| `--tokenizer_name` | `gpt2` | Tokenizer name (encoding or model path) |
+
+**tiktoken encodings:** `gpt2`, `cl100k_base`, `o200k_base`
+
+**HuggingFace tokenizers:** Any model name, e.g., `meta-llama/Llama-2-7b-hf`, `mistralai/Mistral-7B-v0.1`
+
+### Learning Rate Finder (Optional)
+
+Run before training to find optimal learning rate:
+
+```bash
+torchrun --standalone --nproc_per_node=8 bla_gpt/find_lr.py --model_name blagpt
 
 # Output
 Results:
