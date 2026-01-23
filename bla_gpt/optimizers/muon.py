@@ -179,7 +179,7 @@ class Muon(torch.optim.Optimizer):
                         p.data.mul_(1 - adjusted_lr * wd * mask)
                 else:
                     # Standard decoupled weight decay
-                    p.data.mul_(1 - adjusted_lr * wd)
+                    p.data.mul_(1 - lr * wd) # not sure if this line should use adjusted_lr or lr. But lr works better in practice.
 
                 # apply update
                 p.data.add_(u.view(original_shape), alpha=-adjusted_lr)
