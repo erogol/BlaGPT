@@ -2,6 +2,7 @@ import datetime
 import glob
 import json
 import os
+import random
 import subprocess
 import sys
 import time
@@ -229,6 +230,9 @@ class Trainer:
         self.setup_data_loaders()
         if self.is_master:
             self.setup_logging()
+
+        # Track best validation loss for checkpointing
+        self.best_val_loss = float('inf')
 
 
 
@@ -621,14 +625,29 @@ class Trainer:
         return val_loss / self.val_steps
 
     def save_checkpoint(self, step: int, val_loss: Optional[float] = None):
-        """Save model checkpoint."""
+        """Save model checkpoint with complete training state for resumption."""
         log = {
             "step": step,
             "model_config": self.model_config.to_dict(),
             "train_config": self.args.to_dict(),
             "model": self.raw_model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict(),
+            "best_val_loss": self.best_val_loss,
+            "rng_state": {
+                "torch": torch.get_rng_state(),
+                "torch_cuda": torch.cuda.get_rng_state_all(),
+                "numpy": np.random.get_state(),
+                "python": random.getstate(),
+            },
         }
+
+        # Save dataloader state if available (for DistributedDataLoader)
+        if hasattr(self.train_loader, 'current_shard') and hasattr(self.train_loader, 'current_position'):
+            log["dataloader_state"] = {
+                "current_shard": self.train_loader.current_shard,
+                "current_position": self.train_loader.current_position,
+            }
 
         if val_loss is not None:
             log["val_loss"] = val_loss
@@ -661,6 +680,61 @@ class Trainer:
         for f in glob.glob(f"{self.logdir}/best_model_*.pt"):
             if f != best_model_path:
                 os.remove(f)
+
+    def load_checkpoint(self, checkpoint_path: str) -> int:
+        """Load checkpoint and restore all training state.
+
+        Args:
+            checkpoint_path: Path to the checkpoint file to load.
+
+        Returns:
+            The step number to resume from (the step after the saved checkpoint).
+        """
+        if self.is_master:
+            print_rank0(f"Loading checkpoint from {checkpoint_path}")
+
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+
+        # Restore model weights (handle torch.compile _orig_mod. prefix if present)
+        state_dict = checkpoint['model']
+        new_state_dict = {k.replace('_orig_mod.', ''): v for k, v in state_dict.items()}
+        self.raw_model.load_state_dict(new_state_dict)
+
+        # Restore optimizer state
+        self.optimizer.load_state_dict(checkpoint['optimizer'])
+
+        # Restore scheduler state (if present)
+        if 'scheduler' in checkpoint and self.scheduler is not None:
+            self.scheduler.load_state_dict(checkpoint['scheduler'])
+
+        # Restore best validation loss
+        if 'best_val_loss' in checkpoint:
+            self.best_val_loss = checkpoint['best_val_loss']
+
+        # Restore RNG state for reproducibility
+        if 'rng_state' in checkpoint:
+            rng_state = checkpoint['rng_state']
+            torch.set_rng_state(rng_state['torch'])
+            torch.cuda.set_rng_state_all(rng_state['torch_cuda'])
+            np.random.set_state(rng_state['numpy'])
+            random.setstate(rng_state['python'])
+
+        # Restore dataloader state (for DistributedDataLoader)
+        if 'dataloader_state' in checkpoint:
+            dl_state = checkpoint['dataloader_state']
+            if hasattr(self.train_loader, 'current_shard') and hasattr(self.train_loader, 'current_position'):
+                self.train_loader.current_shard = dl_state['current_shard']
+                self.train_loader.current_position = dl_state['current_position']
+
+        step = checkpoint['step']
+        if self.is_master:
+            print_rank0(f"Checkpoint loaded. Resuming from step {step + 1}")
+            if 'val_loss' in checkpoint:
+                print_rank0(f"  Last validation loss: {checkpoint['val_loss']:.4f}")
+            if 'best_val_loss' in checkpoint:
+                print_rank0(f"  Best validation loss: {checkpoint['best_val_loss']:.4f}")
+
+        return step
 
     def train_step(
         self, x: torch.Tensor, y: torch.Tensor
@@ -695,17 +769,22 @@ class Trainer:
 
         return train_loss, metrics
 
-    def train(self):
-        """Main training loop."""
+    def train(self, start_step: int = 0):
+        """Main training loop.
+
+        Args:
+            start_step: Step to start training from (for resumption).
+        """
         training_time_ms = 0
-        best_val_loss = float("inf")
         torch.cuda.synchronize()
         t0 = time.time()
 
-        self.train_loader.reset()
+        # Only reset dataloader if starting from scratch
+        if start_step == 0:
+            self.train_loader.reset()
         x, y = self.train_loader.next_batch()
 
-        for step in range(self.args.num_iterations + 1):
+        for step in range(start_step, self.args.num_iterations + 1):
             last_step = step == self.args.num_iterations
 
             # Reset timing after first 10 steps
@@ -729,8 +808,8 @@ class Trainer:
                     self._log_validation_results(
                         step, val_loss, training_time_ms, timed_steps
                     )
-                    if self.args.save_best_model and val_loss < best_val_loss:
-                        best_val_loss = val_loss
+                    if self.args.save_best_model and val_loss < self.best_val_loss:
+                        self.best_val_loss = val_loss
                         self.save_best_model(step, val_loss)
 
                 torch.cuda.synchronize()
@@ -803,6 +882,10 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("--config", type=str, default=None, help="Path to model config file")
     parser.add_argument("--model_name", type=str, default="bla_gpt", help="Model architecture to use")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Path to checkpoint to resume training from")
+    parser.add_argument("--auto_resume", action="store_true",
+                        help="Automatically resume from latest checkpoint in logdir")
 
     # Get default hyperparameters and add them to argument parser
     hyperparams = Hyperparameters()
@@ -862,8 +945,27 @@ def main():
         if hasattr(args, field_name):
             setattr(hyperparams, field_name, getattr(args, field_name))
 
+    # Handle auto_resume before creating trainer (to find existing checkpoint)
+    resume_checkpoint = args.resume
+    if not resume_checkpoint and args.auto_resume:
+        # Search for existing checkpoints matching this run_name
+        # Pattern: logs/{run_name}_*/state_step*.pt
+        pattern = f"logs/{hyperparams.run_name}_*/state_step*.pt"
+        checkpoints = sorted(glob.glob(pattern))
+        if checkpoints:
+            resume_checkpoint = checkpoints[-1]
+            rank = int(os.environ.get("RANK", 0))
+            if rank == 0:
+                print_rank0(f"Auto-resume: found checkpoint {resume_checkpoint}")
+
     trainer = Trainer(hyperparams, args.model_name, args.config)
-    trainer.train()
+
+    # Resume from checkpoint if specified
+    start_step = 0
+    if resume_checkpoint:
+        start_step = trainer.load_checkpoint(resume_checkpoint) + 1
+
+    trainer.train(start_step=start_step)
 
 
 if __name__ == "__main__":
