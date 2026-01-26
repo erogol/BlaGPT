@@ -8,10 +8,6 @@ from bla_gpt import GPTConfig
 @dataclass
 class BestConfig(GPTConfig):
     """Best model configuration for BLA-GPT.
-
-    Results:
-    step:5100/5100 val_loss:3.2411 train_time:3159041ms step_avg:620.64ms
-    peak memory consumption: 40916 MiB
     """
 
     block_size: int = 1024
@@ -77,6 +73,14 @@ class BestConfig(GPTConfig):
     top_window_size: int = 1024  # Window size for TOP target construction (should be <= block_size)
     top_loss_weight: float = 1.0
 
+    # # engram config
+    use_engram: bool = True
+    engram_layers=[1,2,3,4,5,6]
+    engram_ngram=2
+    engram_vocab_mult: int = 5
+    engram_share_embedding: bool = True
+    engram_variant: str = "minimal"
+
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
     dilation_rates: list[int] = field(default_factory=lambda: [1, 2, 4, 6, 12])
@@ -100,7 +104,7 @@ class BestConfig(GPTConfig):
         default_factory=lambda: {
             "betas": (0.9, 0.95),
             "eps": 1e-8,
-            "wd": 0.1,
+            "weight_decay": 0.0,
             "use_cautious_weight_decay": False,
         }
     )

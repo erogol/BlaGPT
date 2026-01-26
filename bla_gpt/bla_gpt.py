@@ -103,6 +103,14 @@ class GPTConfig(Coqpit):
     )
     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
 
+    # Engram: N-gram hash memory lookup
+    # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+    use_engram: bool = False
+    engram_variant: str = "ngram_lambda"  # "ngram_lambda", "simple", or "minimal"
+    engram_ngram: int = 3  # N-gram size (2=bigrams, 3=trigrams, etc.)
+    engram_vocab_mult: int = 5  # Hash table size multiplier (table_size = mult * vocab_size)
+    engram_share_embedding: bool = True  # Share embedding across layers
+
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
     dilation_rates: list[int] = field(default_factory=lambda: [1, 2, 4, 6, 12])
@@ -592,6 +600,20 @@ class GPT(nn.Module):
         if config.use_per_token_output_bias:
             self.output_bias_emb = nn.Embedding(config.vocab_size, config.n_embd)
 
+        # Engram: N-gram hash memory lookup
+        self.engram = None
+        self.engram_variant = config.engram_variant if config.use_engram else None
+        if config.use_engram:
+            from engram import create_engram
+            self.engram = create_engram(
+                variant=config.engram_variant,
+                hidden_size=config.n_embd,
+                vocab_size=config.vocab_size,
+                num_layers=config.n_layer,
+                ngram=config.engram_ngram,
+                vocab_mult=config.engram_vocab_mult,
+            )
+
         # init all weights
         self.apply(self._init_weights)
         # apply special scaled init to the residual projections, per GPT-2 paper
@@ -690,7 +712,21 @@ class GPT(nn.Module):
             x = self.transformer.drop(tok_emb + pos_emb)
         else:
             x = self.transformer.drop(tok_emb)
-        for block in self.transformer.h:
+
+        # Engram: compute n-gram embedding and store initial state for lambda mixing
+        x0 = None
+        x0_ngram = None
+        if self.engram is not None and self.engram_variant == "ngram_lambda":
+            x0 = x  # Initial token embedding (after dropout)
+            x0_ngram = self.engram.get_ngram_embedding(idx)  # N-gram hash embedding
+
+        for layer_idx, block in enumerate(self.transformer.h):
+            # Apply engram based on variant
+            if self.engram is not None:
+                if self.engram_variant == "ngram_lambda":
+                    x = self.engram.mix_at_layer(x, x0, x0_ngram, layer_idx)
+                else:  # "simple" or "minimal"
+                    x = x + self.engram(x, idx)
             x = block(x, token_ids=idx)
         x = self.transformer.ln_f(x)
 
