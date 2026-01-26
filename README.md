@@ -4,11 +4,9 @@ Experimental playground for benchmarking language model (LM) architectures, laye
 
 ## 📚 Technique Documentation
 
-See the [**techniques/**](./techniques/) directory for explanations of various techniques implemented in this repository.
+See the [**techniques/**](./techniques/) directory for technical explanations and code snippets for various techniques and models implemented in the project.
 
-**Latest**: [STEM](./techniques/stem.md)
-
-## Techniquies under BlaGPT
+## Techniques under BlaGPT
 BlaGPT is a flexible Transformer implementation that you can turn on/off following things in the config.
 
 I basically do a greedy architecture search and add every new technique on top of the best model config and see if it improves the performance or not.
@@ -64,9 +62,11 @@ TOP loss - [paper](https://arxiv.org/abs/2508.19228) | [explanation](./technique
 
 Simplified RoPe - [link](https://x.com/zhaisf/status/1999050766691205363?s=20) - best_model_loss: `3.2411` -> loss: `3.2620` - peak memory: `43585 MiB` - step_avg: `388.54ms`
 
-👑 Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./techniques/gated_attention.md) - best_model_loss: `3.2411` -> new_best_model_loss: `3.2327` - peak memory: `45968 MiB` - step_avg: `413.01ms`
+Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./techniques/gated_attention.md) - best_model_loss: `3.2411` -> new_best_model_loss: `3.2327` - peak memory: `45968 MiB` - step_avg: `413.01ms`
 
 ResFormer (Plus) - [paper](https://arxiv.org/html/2410.17897v5) | [explanation](./techniques/resformer.md) - best_model_loss: `3.2327` -> model_loss: `3.3538` - peak memory: `38223 MiB` - step_avg: `326.32ms`
+
+👑 Engram (My Simple Variant) - [paper](https://github.com/deepseek-ai/Engram/blob/main/Engram_paper.pdf) | [explanation](./techniques/engram.md) - best_model_loss: `3.2327` -> new_best_model_loss: `3.2296` - peak memory: `50488 MiB` - step_avg: `504.09ms`
 
 
 ## Other Models
