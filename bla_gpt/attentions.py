@@ -1070,6 +1070,100 @@ class GatedAttention(Attention):
         return gated_y
 
 
+@torch.compile
+def diff_attn_v2_func(attn1: torch.Tensor, attn2: torch.Tensor, lambda_val: torch.Tensor) -> torch.Tensor:
+    """Differential attention v2: attn1 - sigmoid(lambda) * attn2"""
+    return attn1 - torch.sigmoid(lambda_val).unsqueeze(-1) * attn2
+
+
+class MultiheadDiffAttnv2(Attention):
+    """
+    Differential Attention v2 (Microsoft, Jan 2025)
+
+    Key improvements over v1:
+    - Doubled query heads (2h), same KV heads (native GQA support)
+    - Token-specific sigmoid lambda (vs global exponential)
+    - No per-head RMSNorm (stable gradients)
+    - Single FlashAttention call (efficient)
+
+    From: https://huggingface.co/blog/microsoft/diff-attn-v2
+    """
+
+    def __init__(self, config):
+        # Store doubled head count before calling super().__init__
+        self._doubled_n_head = config.n_head * 2
+        super().__init__(config)
+
+        # Lambda projection: (n_embd) -> (n_head) per token
+        self.lambda_proj = nn.Linear(config.n_embd, config.n_head, bias=False)
+
+    def set_layers(self, config):
+        # Query projection with DOUBLED heads
+        self.q_proj = nn.Linear(
+            config.n_embd,
+            self._doubled_n_head * self.head_dim,
+            bias=config.bias or config.use_qkv_bias
+        )
+        # KV projection stays the same
+        self.kv_proj = nn.Linear(
+            config.n_embd,
+            2 * config.n_embd // (config.n_head // config.n_kv_head),
+            bias=config.bias or config.use_qkv_bias,
+        )
+        # Output projection: back to n_embd (not doubled)
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+
+    def _project_query(self, x, B, T):
+        # Project to doubled heads
+        return self.q_proj(x).view(B, T, self._doubled_n_head, self.head_dim)
+
+    def _prepare_qkv(self, q, k, v):
+        # q has doubled heads, k/v have normal heads
+        q = q.transpose(1, 2)  # (B, 2*n_head, T, head_dim)
+        k = k.transpose(1, 2)  # (B, n_kv_head, T, head_dim)
+        v = v.transpose(1, 2)
+
+        # Expand k,v to match doubled query heads
+        # Each KV head serves 2x the query heads now
+        n_rep = self._doubled_n_head // self.n_kv_head
+        k = k.repeat_interleave(n_rep, dim=1)
+        v = v.repeat_interleave(n_rep, dim=1)
+
+        return q, k, v
+
+    def forward(self, x, q=None, mask=None):
+        # Store input for lambda computation
+        self._x_input = x
+        return super().forward(x, q, mask)
+
+    def _apply_diff_attn(self, y):
+        """Apply differential attention: attn1 - sigmoid(lambda) * attn2"""
+        # y shape: (B, 2*n_head, T, head_dim)
+        # Split into odd/even heads (same GQA group)
+        attn1 = y[:, 0::2]  # (B, n_head, T, head_dim)
+        attn2 = y[:, 1::2]  # (B, n_head, T, head_dim)
+
+        # Compute token-specific lambda
+        lambda_val = self.lambda_proj(self._x_input)  # (B, T, n_head)
+        lambda_val = lambda_val.transpose(1, 2)  # (B, n_head, T)
+
+        # Apply diff function
+        return diff_attn_v2_func(attn1, attn2, lambda_val)
+
+    def _flash_attention(self, q, k, v):
+        y = super()._flash_attention(q, k, v)
+        return self._apply_diff_attn(y)
+
+    def _manual_attention(self, q, k, v, T_q, T):
+        y = super()._manual_attention(q, k, v, T_q, T)
+        return self._apply_diff_attn(y)
+
+    def _project_output(self, y, B, T_q, C):
+        # y now has n_head (not doubled), normal output projection
+        y = y.transpose(1, 2).contiguous().view(B, T_q, C)
+        return self.resid_dropout(self.c_proj(y))
+
+
 #
 # WIP Implementations
 #

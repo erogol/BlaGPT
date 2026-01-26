@@ -66,7 +66,9 @@ Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./te
 
 ResFormer (Plus) - [paper](https://arxiv.org/html/2410.17897v5) | [explanation](./techniques/resformer.md) - best_model_loss: `3.2327` -> model_loss: `3.3538` - peak memory: `38223 MiB` - step_avg: `326.32ms`
 
-👑 Engram (My Simple Variant) - [paper](https://github.com/deepseek-ai/Engram/blob/main/Engram_paper.pdf) | [explanation](./techniques/engram.md) - best_model_loss: `3.2327` -> new_best_model_loss: `3.2296` - peak memory: `50488 MiB` - step_avg: `504.09ms`
+Engram (My Simple Variant) - [paper](https://github.com/deepseek-ai/Engram/blob/main/Engram_paper.pdf) | [explanation](./techniques/engram.md) - best_model_loss: `3.2327` -> new_best_model_loss: `3.2296` - peak memory: `50488 MiB` - step_avg: `504.09ms`
+
+👑 Differential Attention v2 - [paper](https://spiky-homegrown-4cb.notion.site/Differential-Transformer-V2-2e7baa052def80ecaa93d4d67d125417) | [explanation](./techniques/diffattnv2.md) - best_model_loss: `3.2296` -> new_best_model_loss: `3.2274` - peak memory: `52829 MiB` - step_avg: `535.16`
 
 
 ## Other Models

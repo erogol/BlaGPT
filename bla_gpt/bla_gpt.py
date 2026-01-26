@@ -16,7 +16,7 @@ import torch.nn as nn
 
 from attentions import (Attention, DilatedAttention, ForgettingAttention,
                         GatedAttention, KDAAttention, KVShiftingAttention,
-                        MultiheadDiffAttn, MultiHeadLatentAttention,
+                        MultiheadDiffAttn, MultiheadDiffAttnv2, MultiHeadLatentAttention,
                         MultiTokenAttention, PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
 from losses import compute_top_loss, compute_z_loss
@@ -303,6 +303,8 @@ def get_attention(config, depth=None):
         return KDAAttention(config)
     elif attn_type == "gated":
         return GatedAttention(config)
+    elif attn_type == "DiffAttnv2":
+        return MultiheadDiffAttnv2(config)
     raise ValueError(f"Unrecognized attention type {attn_type}")
 
 

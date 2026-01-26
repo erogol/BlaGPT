@@ -27,7 +27,7 @@ class BestConfig(GPTConfig):
 
     # Transformer parameters
     norm_layer: str = "rmsnorm"  # type of normalization layer to use
-    attention: str = "gated"  # attention type in `get_attention()`
+    attention: str = "DiffAttnv2"  # attention type in `get_attention()`
     activation: str = "swiglu"  # activation type in `get_mlp()`
     use_soft_logit_capping: bool = False
     n_kv_head: int = 4  # Number of heads for the key and value (Grouped Query Attention), if n_kv_head == n_head, it is full attention
