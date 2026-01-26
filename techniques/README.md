@@ -6,6 +6,7 @@ This directory tries to explain various techniques implemented in this repositor
 - [**ResFormer**](./resformer.md) - Value residual learning from first layer to all subsequent layers
 
 ## Attention Mechanisms
+- [**Differential Attention v2**](./diff_attn_v2.md) - Subtracts two attention patterns to cancel noise and amplify relevant signals
 - [**Gated Attention**](./gated_attention.md) - Sigmoid gates after SDPA for improved training stability
 - [**Key-Dimension Attention (KDA)**](./kda.md) - Linear-complexity attention with fine-grained gating and delta rule
 
