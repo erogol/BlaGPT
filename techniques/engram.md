@@ -155,8 +155,3 @@ for layer_idx in range(num_layers):
     x = ngram_engram.mix_at_layer(x, x0, x0_ngram, layer_idx)
     x = transformer_block(x)
 ```
----
-
-**Paper**: [Engram: Memorize and Retrieve N-grams for Efficient Pre-training](https://github.com/deepseek-ai/Engram)
-**Implementation**: `/bla_gpt/engram.py`
-**Status**: Experimental
