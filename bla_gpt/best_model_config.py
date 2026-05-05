@@ -63,6 +63,12 @@ class BestConfig(GPTConfig):
     # Parallel Transformer (like PaLM) block parameters
     use_parallel_blocks: bool = False  # Whether to apply attention and mlp blocks in parallel instead of sequentially
 
+    # Hyper-Connections
+    use_hyper_connections: bool = True
+    hyper_num_streams: int = 4
+    hyper_dynamic: bool = True
+    hyper_tanh: bool = True
+
     use_per_layer_token_emb: bool = (
         True  # Whether to add token embedding to the block input
     )
