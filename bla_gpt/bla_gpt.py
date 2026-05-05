@@ -96,6 +96,12 @@ class GPTConfig(Coqpit):
     # Parallel Transformer (like PaLM) block parameters
     use_parallel_blocks: bool = False  # Whether to apply attention and mlp blocks in parallel instead of sequentially
 
+    # Hyper-Connections parameters
+    use_hyper_connections: bool = False  # Replace residual connections with Hyper-Connections streams
+    hyper_num_streams: int = 4  # Expansion rate n from the paper, DHCx4 by default
+    hyper_dynamic: bool = True  # Use dynamic input-dependent HC matrices
+    hyper_tanh: bool = True  # Apply tanh to dynamic HC deltas
+
     # Transformer block with token embedding parameters
     # no paper AFAIK but hinted in Gemma3n
     use_per_layer_token_emb: bool = (
@@ -407,6 +413,100 @@ class Block(nn.Module):
         return x
 
 
+class HyperConnection(nn.Module):
+    """Hyper-Connection wrapper for one residual branch.
+
+    Keeps multiple residual streams H and replaces x + T(x) with the paper's
+    A_m/A_r/B stream mixing. Static matrices follow layer-wise initialization;
+    optional dynamic deltas are zero-initialized so the model starts from the
+    static schedule.
+    """
+
+    def __init__(self, config, depth):
+        super().__init__()
+        self.num_streams = config.hyper_num_streams
+        self.dynamic = config.hyper_dynamic
+        self.use_tanh = config.hyper_tanh
+
+        if self.num_streams < 1:
+            raise ValueError("hyper_num_streams must be >= 1")
+
+        b = torch.ones(self.num_streams)
+        a_m = torch.zeros(self.num_streams)
+        a_m[depth % self.num_streams] = 1.0
+        a_r = torch.eye(self.num_streams)
+
+        self.B = nn.Parameter(b)
+        self.A_m = nn.Parameter(a_m)
+        self.A_r = nn.Parameter(a_r)
+        self.B._no_weight_decay = True
+        self.A_m._no_weight_decay = True
+        self.A_r._no_weight_decay = True
+
+        if self.dynamic:
+            self.dynamic_norm = get_norm(config)
+            self.dynamic_beta_scale = nn.Parameter(torch.ones(()) * 1e-2)
+            self.dynamic_alpha_scale = nn.Parameter(torch.ones(()) * 1e-2)
+            self.W_beta = nn.Linear(config.n_embd, 1, bias=False)
+            self.W_m = nn.Linear(config.n_embd, 1, bias=False)
+            self.W_r = nn.Linear(config.n_embd, self.num_streams, bias=False)
+            nn.init.zeros_(self.W_beta.weight)
+            nn.init.zeros_(self.W_m.weight)
+            nn.init.zeros_(self.W_r.weight)
+        else:
+            self.dynamic_norm = None
+            self.W_beta = None
+            self.W_m = None
+            self.W_r = None
+
+    def _dynamic_matrices(self, streams):
+        # streams: [B, T, S, C]
+        if not self.dynamic:
+            return self.B, self.A_m, self.A_r
+
+        normed = self.dynamic_norm(streams)
+        b_delta = self.W_beta(normed).squeeze(-1)  # [B, T, S]
+        m_delta = self.W_m(normed).squeeze(-1)  # [B, T, S]
+        r_delta = self.W_r(normed)  # [B, T, S, S]
+        if self.use_tanh:
+            b_delta = torch.tanh(b_delta)
+            m_delta = torch.tanh(m_delta)
+            r_delta = torch.tanh(r_delta)
+        b_delta = b_delta * self.dynamic_beta_scale
+        m_delta = m_delta * self.dynamic_alpha_scale
+        r_delta = r_delta * self.dynamic_alpha_scale
+        return self.B + b_delta, self.A_m + m_delta, self.A_r + r_delta
+
+    def forward(self, streams, branch_fn, ln_pre, ln_post=None, res_weight=None, **kwargs):
+        B, A_m, A_r = self._dynamic_matrices(streams)
+
+        branch_in = torch.einsum("btsc,bts->btc", streams, A_m) if self.dynamic else torch.einsum("btsc,s->btc", streams, A_m)
+        branch_out = branch_fn(ln_pre(branch_in), **kwargs)
+
+        if ln_post is not None:
+            branch_out = ln_post(branch_out)
+        if res_weight is not None:
+            branch_out = res_weight * branch_in + branch_out
+
+        carried = torch.einsum("btsc,btus->btuc", streams, A_r.transpose(-1, -2)) if self.dynamic else torch.einsum("btsc,su->btuc", streams, A_r)
+        injected = branch_out.unsqueeze(2) * B.unsqueeze(-1) if self.dynamic else branch_out.unsqueeze(2) * B.view(1, 1, -1, 1)
+        return carried + injected
+
+
+class HyperBlock(Block):
+    """Block variant that replaces residual connections with Hyper-Connections."""
+
+    def __init__(self, config, depth):
+        super().__init__(config, depth)
+        self.attn_hyper = HyperConnection(config, depth * 2)
+        self.mlp_hyper = HyperConnection(config, depth * 2 + 1)
+
+    def forward(self, x, **kwargs):
+        x = self.attn_hyper(x, self.attn, self.ln_1, self.ln_3, self.res_w1)
+        x = self.mlp_hyper(x, self.mlp, self.ln_2, self.ln_4, self.res_w2, **kwargs)
+        return x
+
+
 class BlockWithTokenEmbedding(Block):
     """
     Based on the explanation in https://old.reddit.com/r/LocalLLaMA/comments/1kuy45r/gemma_3n_architectural_innovations_speculation/
@@ -543,7 +643,9 @@ class GPT(nn.Module):
         self.zero_init_proj_layers = config.zero_init_proj_layers
 
         _Block = Block
-        if "use_parallel_blocks" in config and config.use_parallel_blocks:
+        if config.use_hyper_connections:
+            _Block = HyperBlock
+        elif "use_parallel_blocks" in config and config.use_parallel_blocks:
             _Block = ParallelBlock
         elif "use_canon_layer" in config and config.use_canon_layers:
             _Block = CanonBlock
@@ -624,8 +726,9 @@ class GPT(nn.Module):
                 if self.zero_init_proj_layers:
                     torch.nn.init.zeros_(p)
                 else:
+                    hyper_scale = math.sqrt(config.hyper_num_streams) if config.use_hyper_connections else 1.0
                     torch.nn.init.normal_(
-                        p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer)
+                        p, mean=0.0, std=(0.02 / math.sqrt(2 * config.n_layer)) * hyper_scale
                     )
 
         # report number of parameters
@@ -722,14 +825,27 @@ class GPT(nn.Module):
             x0 = x  # Initial token embedding (after dropout)
             x0_ngram = self.engram.get_ngram_embedding(idx)  # N-gram hash embedding
 
+        if self.config.use_hyper_connections:
+            x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
+
         for layer_idx, block in enumerate(self.transformer.h):
             # Apply engram based on variant
             if self.engram is not None:
-                if self.engram_variant == "ngram_lambda":
+                if self.config.use_hyper_connections:
+                    x_reduced = x.sum(dim=2)
+                    if self.engram_variant == "ngram_lambda":
+                        x_reduced = self.engram.mix_at_layer(x_reduced, x0, x0_ngram, layer_idx)
+                    else:  # "simple" or "minimal"
+                        x_reduced = x_reduced + self.engram(x_reduced, idx)
+                    x = x_reduced.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
+                elif self.engram_variant == "ngram_lambda":
                     x = self.engram.mix_at_layer(x, x0, x0_ngram, layer_idx)
                 else:  # "simple" or "minimal"
                     x = x + self.engram(x, idx)
             x = block(x, token_ids=idx)
+
+        if self.config.use_hyper_connections:
+            x = x.sum(dim=2)
         x = self.transformer.ln_f(x)
 
         # TODO: simplify this
@@ -908,8 +1024,14 @@ class GPT(nn.Module):
         param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
         # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
         # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
-        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
-        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        decay_params = [
+            p for n, p in param_dict.items()
+            if p.dim() >= 2 and not getattr(p, "_no_weight_decay", False)
+        ]
+        nodecay_params = [
+            p for n, p in param_dict.items()
+            if p.dim() < 2 or getattr(p, "_no_weight_decay", False)
+        ]
         optim_groups = [
             {"params": decay_params, "weight_decay": weight_decay},
             {"params": nodecay_params, "weight_decay": 0.0},

@@ -18,6 +18,19 @@ def register_best():
 
 
 @register_model
+def register_hyper_connections():
+    """Dynamic Hyper-Connections with 4 residual streams."""
+    from bla_gpt import GPT, GPTConfig
+
+    config = GPTConfig()
+    config.use_hyper_connections = True
+    config.hyper_num_streams = 4
+    config.hyper_dynamic = True
+
+    return config, GPT
+
+
+@register_model
 def register_stem():
     """STEM with 1/3 layer replacement (default, balanced)"""
     from bla_gpt import GPT, GPTConfig
