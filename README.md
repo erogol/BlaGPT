@@ -70,6 +70,8 @@ Engram (My Simple Variant) - [paper](https://github.com/deepseek-ai/Engram/blob/
 
 👑 Differential Attention v2 - [paper](https://spiky-homegrown-4cb.notion.site/Differential-Transformer-V2-2e7baa052def80ecaa93d4d67d125417) | [explanation](./techniques/diffattnv2.md) - best_model_loss: `3.2296` -> new_best_model_loss: `3.2274` - peak memory: `52829 MiB` - step_avg: `535.16`
 
+Exclusive Self Attention - [paper](https://arxiv.org/html/2603.09078v1) - best_model_loss: `3.2327` -> new_best_model_loss: `3.2303` - train_loss: `3.1987` - peak memory: `49859 MiB` - step_avg: `424.54ms`
+
 Hyper-Connections - [paper](https://arxiv.org/abs/2409.19606) | [explanation](./techniques/hyper_connections.md) - best_model_loss: `3.2327` -> loss: `3.2741` - train_loss: `3.2388` - peak memory: `68729 MiB` - step_avg: `928.26ms` - did not beat the old best
 
 
