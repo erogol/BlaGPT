@@ -12,7 +12,7 @@ Normal Transformer blocks have one residual stream:
 x = x + block(norm(x))
 ```
 
-Hyper-Connections expand this into `n` parallel residual streams. Each attention or MLP branch first mixes the streams into one branch input, runs the normal branch, then injects the branch output back into all streams. The goal is to give the network a richer residual communication pattern without changing the attention or MLP internals.
+Hyper-Connections expand this into `n` parallel residual streams. Each attention or MLP branch reads a learned mix of the streams, runs the normal branch, then writes the output back into the streams. So the residual path becomes a small learned routing system instead of a single add.
 
 In BlaGPT this is implemented as Dynamic Hyper-Connections with 4 streams, `DHCx4`.
 
@@ -88,7 +88,7 @@ This did not beat the old best around `3.2327`. It also made training much heavi
 
 ## Takeaway
 
-Hyper-Connections are interesting mechanically, but for this BlaGPT setup they are not a free win. The extra streams and dynamic mixing add a lot of memory and compute, while the final validation loss was worse than the previous best. For now it stays as an implemented experiment, not part of the best config.
+Hyper-Connections are neat, but in this BlaGPT run they were too expensive. The 4-stream dynamic version pushed memory and step time way up, while validation loss got worse than the previous best. For now it stays as an implemented experiment, not part of the best config.
 
 ---
 
