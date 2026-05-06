@@ -312,6 +312,26 @@ class Attention(nn.Module):
 #
 
 
+class ExclusiveSelfAttention(Attention):
+    """Exclusive Self Attention.
+
+    Removes the component of each attention output that lies in the
+    corresponding value-vector direction before the output projection.
+    """
+
+    def _apply_exclusion(self, y, v):
+        v_norm = F.normalize(v, p=2, dim=-1, eps=1e-6)
+        return y - (y * v_norm).sum(dim=-1, keepdim=True) * v_norm
+
+    def _flash_attention(self, q, k, v):
+        y = super()._flash_attention(q, k, v)
+        return self._apply_exclusion(y, v)
+
+    def _manual_attention(self, q, k, v, T_q, T):
+        y = super()._manual_attention(q, k, v, T_q, T)
+        return self._apply_exclusion(y, v)
+
+
 class MultiHeadLatentAttention(Attention):
     def __init__(self, config):
         assert config.n_latentd > 0, "Must provide number of latent dimensions"
