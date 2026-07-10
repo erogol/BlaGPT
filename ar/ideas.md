@@ -61,3 +61,19 @@ Pick: unet — proven mechanism at this scale, cheap (scalars only), attacks gra
 2. [snapshot-avg] uniform weight average of last-K iterate snapshots (K=50 steps). Snapshot checkpoints saved after warmdown begins (~step 1100); final-val swaps in the average. No exponential decay bias from early high-LR weights. Different from EMA which was discarded.
 3. [moe-ffn] Mixture-of-Experts on the FFN sublayer: 4 experts, top-2 routing, auxiliary load-balance loss. Well-proven quality/step tradeoff; no extra params at inference if fused. Distinct from all tried mechanisms.
 Pick: moe-ffn — highest EV (proven quality gains at this scale), strong mechanism novelty, and the no-PLTE base has 14% more steps to amortize the routing overhead.
+
+## Exp 25 (MoE-FFN) postmortem
+- DISCARD: 3.8149 (+0.375), 993 steps (vs 2074 dense). 2× step-cost killed it.
+- Root cause: sequential top-k dispatch in Python loop over 4 experts; routing overhead dominates at 600s budget.
+- LESSON: MoE needs batched/fused dispatch (e.g. torch.gather scatter-add or triton kernel) to win under this budget. Not worth retrying without a fused kernel.
+- Meta: BIG-FLOP additions hurt under the 600s constraint. Mechanisms must be param-neutral or compute-neutral to compete.
+
+## Invent-slot #5 candidates (post-exp-25)
+1. [learned-lr] Per-parameter adaptive learning-rate scaling: a small MLP that reads parameter gradient stats and outputs per-layer LR multipliers. Lightweight (tiny MLP, no backward through it), affects optimizer dynamics not model compute.
+2. [alibi-pos] ALiBi positional bias instead of RoPE: no positional embedding params, learned only via attention bias slopes. Tests whether RoPE is optimal for this seq length.
+3. [attention-sink-token] Prepend 1 learnable "sink" token to KV cache per layer. Sink absorbs "nothing useful" attention mass. Different from VE (no value-emb, just KV sink), no extra compute per non-sink token.
+Best pick for EXPLORE slot: MTP (n_predict=2) from queue — quota says explore next, and this is a direct config change on the no-PLTE best.
+
+## Exp 26 (MTP n_predict=2) postmortem
+- DISCARD 4.3863: harness final_val_loss averages ALL heads; the t+2 head is ~1.9 nats harder -> MTP cannot win under this metric BY CONSTRUCTION (not a quality signal about MTP itself). Also -37% steps, +10GB VRAM.
+- Queue is now fully drained (10 z_loss, 11 softpick-deprioritized, 12 MTP all resolved).
