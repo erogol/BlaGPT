@@ -55,3 +55,9 @@ Pick: unet — proven mechanism at this scale, cheap (scalars only), attacks gra
 - Early-training boost is real (best smoke of the day) but converts to zero net gain by 600s.
 - COMBO candidate: unet(0.25) might stack with a mechanism that helps late training; also candidate if budget ever grows (helps early = helps more when budget shrinks?  test unet at 300s sometime).
 - Meta-note: 3 invent chains today, knob moves within a mechanism ~0.001-0.012; mechanism CHOICE dominates. Spend run 4 only when trajectory slope > eps.
+
+## v2.1 invent-slot #4 candidates (2026-07-10, pre-exp-25)
+1. [sink] learned attention-sink: prepend 1 learnable KV pair per layer; all queries can attend to it, letting the model park "nothing useful here" attention mass. Distinct from VE (separate KV not V only) and from unet (no long-range skip).
+2. [snapshot-avg] uniform weight average of last-K iterate snapshots (K=50 steps). Snapshot checkpoints saved after warmdown begins (~step 1100); final-val swaps in the average. No exponential decay bias from early high-LR weights. Different from EMA which was discarded.
+3. [moe-ffn] Mixture-of-Experts on the FFN sublayer: 4 experts, top-2 routing, auxiliary load-balance loss. Well-proven quality/step tradeoff; no extra params at inference if fused. Distinct from all tried mechanisms.
+Pick: moe-ffn — highest EV (proven quality gains at this scale), strong mechanism novelty, and the no-PLTE base has 14% more steps to amortize the routing overhead.

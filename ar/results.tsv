@@ -32,3 +32,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 23	0c851a5	611705b	3.442804	0.003565	45028	2058	1079.0	discard	no_plte_unet0.25	unet combo worse than no_plte alone. early boost still washes; residual contamination dominates
 24	59f33c3	611705b	3.438642	-0.000635	45029	2056	1077.9	rerun?	no_plte_res_weights	beats best by 0.0007 (borderline). confirming
 24b	pending	611705b	3.440217	0.000783	45029	2054	1076.9	discard	no_plte_res_weights_confirm	rerun worse than best (3.4402 > 3.4393). fluke run 1. discard
+25	611705b	611705b	3.814919	0.375619	48624	993	520.6	discard	moe_ffn	worst of session: 2x slower (993 steps), aux_loss dominates, routing did not converge in budget
