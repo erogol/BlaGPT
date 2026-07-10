@@ -52,3 +52,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 35b	52df558	c9e6600	3.406199	-0.001215	42455	2748	1440.7	keep	warmup100_confirm	CONFIRMED: both beat 3.4074 (3.4047, 3.4062). NEW BEST 3.4047. override-pass code lands with this keep [class=BUDGET-ARTIFACT]
 36	956e334	52df558	3.406660	0.001964	42455	2754	1443.9	discard	warmup50	warmup curve turned: 250=3.4074 100=3.4047 50=3.4067. optimum 100, knob closed
 37	956e334	52df558	3.405028	0.000332	42455	2910	1525.7	discard	batch_ramp_800	tie: +6pct steps but half-batch noise dilutes per-step quality. early-boost washes out by 600s (unet pattern). family closed
+38	956e334	52df558	3.422904	0.018208	40662	2863	1501.0	discard	width704	width cut hurts 10x more than depth cut. 768 load-bearing. width closed
