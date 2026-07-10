@@ -107,3 +107,9 @@ leakage before keeping.
 ## Launch
 
 /nvme/ar/run_experiment.sh <n> best [/nvme/ar/runs/<n>/config.json]
+
+## Keep classification (added 2026-07-10, per owner)
+- Every KEEP must be classified in its results.tsv note: [class=TRANSFERABLE] (plausibly helps at real horizons: architecture, capacity/step trades, data ordering) or [class=BUDGET-ARTIFACT] (only exploits the fixed 600s budget: warmup/warmdown shape, schedule-integral tweaks).
+- Budget-artifact keeps update the running best (the metric is the metric) but do NOT count as invent-slot wins; their families get at most one mapping experiment, then close. No further LR-schedule-integral mining.
+- Invent slots must have a transfer story.
+- Final report: best_config deltas listed in the two classes separately.
