@@ -80,7 +80,16 @@
     "weight_decay": 0.0,
     "use_cautious_weight_decay": false
   },
-  "seq_curriculum_steps": 1200,
+  "seq_curriculum_steps": 0,
   "seq_curriculum_len": 384,
-  "warmup_iters": 100
+  "seq_curriculum_stages": [
+    [
+      60,
+      384
+    ],
+    [
+      140,
+      640
+    ]
+  ]
 }
