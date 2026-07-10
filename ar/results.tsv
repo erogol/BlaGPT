@@ -1,17 +1,17 @@
 n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
-0	9740ded	baseline	3.452022	0.000000	46721	1875	102.8	keep	baseline	3 runs: mean=3.455141 sigma=0.003187 eps=0.006374
+0	9740ded	baseline	3.452022	0.000000	46721	1875	102.8	keep	baseline	3 runs: mean=3.455141 sigma=0.003187 eps=0.006374 [class=TRANSFERABLE]
 1	9740ded	9740ded	3.480689	-0.028667	41981	2191	1148.7	discard	parallel_blocks	14pct faster but worse quality (335M vs 495M params)
 2	9740ded	9740ded	3.455125	0.003103	46710	1872	981.5	discard	engram_all_layers	within noise, 6 layers is sufficient
 3	9740ded	9740ded	3.457220	0.005198	45316	1908	1000.3	discard	plte_dim_128	slightly worse, 256 is correct dim
 4	9740ded	9740ded	3.446940	-0.005082	48778	1812	950.0	rerun?	full_mha	borderline (within eps), rerunning to confirm
-4b	f32b8a3	9740ded	3.446820	-0.005202	48769	1816	952.1	keep	full_mha_rerun	confirmed: both runs beat baseline. NEW BEST
+4b	f32b8a3	9740ded	3.446820	-0.005202	48769	1816	952.1	keep	full_mha_rerun	confirmed: both runs beat baseline. NEW BEST [class=TRANSFERABLE]
 5	f32b8a3	f32b8a3	3.448000	0.001180	49358	1784	935.3	discard	mha_plus_ptob	worse than MHA alone, +39M params for nothing
 6	f32b8a3	f32b8a3	3.446291	-0.000529	48769	1811	949.5	rerun?	mha_plus_canon	borderline, free (no extra params/vram), rerunning
 6b	f32b8a3	f32b8a3	3.449039	0.002219	48769	1816	952.1	discard	mha_plus_canon_rerun	rerun worse, first run was noise. canon doesnt stack
 7	f32b8a3	f32b8a3	3.447752	0.000932	48769	1804	945.8	discard	mha_lr_1.4x	1.4x LR overshoots, 0.001 is well-tuned
 8	f32b8a3	f32b8a3	3.446609	-0.000211	48769	1806	946.9	discard	mha_lr_0.7x	within noise, LR well-tuned in 0.0007-0.001 range
 9	f32b8a3	f32b8a3	3.443671	-0.003149	48769	1816	952.1	rerun?	rope_theta_1e6	borderline (-0.0031, within eps), config-only on MHA best. rerunning as 9b
-9b	b321d27	f32b8a3	3.442740	-0.004080	48769	1816	952.1	keep	rope_theta_1e6_rerun	confirmed: both runs beat best (3.4437, 3.4427). NEW BEST
+9b	b321d27	f32b8a3	3.442740	-0.004080	48769	1816	952.1	keep	rope_theta_1e6_rerun	confirmed: both runs beat best (3.4437, 3.4427). NEW BEST [class=TRANSFERABLE]
 14	82df040	b321d27	3.458004	0.015264	49935	1724	903.9	chain	value_embeddings	chain 1/4: lambda0.5 first3+last3 layers, +38.6M params, 4.7pct fewer steps. tune lambda next
 14b	82df040	b321d27	3.456745	0.014005	49935	1733	908.6	chain	value_embeddings_l0.1	chain 2/4: lambda 0.1 vs 0.5 flat (-0.0013, noise). lambda not the issue; next test VE replacing PLTE (redundancy hyp)
 14c	82df040	b321d27	3.454357	0.011617	46100	1958	1026.6	chain	ve_replaces_plte	chain 3/4: PLTE off frees 159M params, +13pct steps, but VE alone worse than PLTE. final: lambda 0.5 w/o PLTE
@@ -27,7 +27,7 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 20b	0876856	b321d27	3.444610	0.001870	48864	1804	945.8	chain	unet_init0.25	chain 2/4: -0.0124 vs run1, strong trajectory. direction says lower init; next 0.1
 20c	0876856	b321d27	3.445390	0.002650	48864	1808	947.9	discard	unet_init0.1	chain 3/4 verdict: knob curve 1.0=3.4570 0.25=3.4446 0.1=3.4454 plateaus at tie-with-best. closed early. best invent line so far, combo candidate
 21	b321d27	b321d27	3.440910	-0.001830	44930	2074	1087.4	rerun?	no_plte	PLTE removal: -159M params, +14pct steps, beats best by 0.0018 (borderline). confirming
-21b	611705b	b321d27	3.439277	-0.003463	44930	2074	1087.4	keep	no_plte_confirm	CONFIRMED: both runs beat best (3.4409, 3.4393). NEW BEST 3.4393. -159M params, +14pct steps
+21b	611705b	b321d27	3.439277	-0.003463	44930	2074	1087.4	keep	no_plte_confirm	CONFIRMED: both runs beat best (3.4409, 3.4393). NEW BEST 3.4393. -159M params, +14pct steps [class=TRANSFERABLE]
 22	611705b	611705b	3.476925	0.037648	44930	1992	1044.4	discard	z_loss_1e-4	worst of day: hurts quality AND costs 4pct steps. z_loss line dead
 23	0c851a5	611705b	3.442804	0.003565	45028	2058	1079.0	discard	no_plte_unet0.25	unet combo worse than no_plte alone. early boost still washes; residual contamination dominates
 24	59f33c3	611705b	3.438642	-0.000635	45029	2056	1077.9	rerun?	no_plte_res_weights	beats best by 0.0007 (borderline). confirming
@@ -36,18 +36,18 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 26	f5749ed	611705b	4.386320	0.947020	55045	1296	679.5	discard	mtp_n2	metric averages both heads; t+2 head ~1.9 nats harder so incomparable by construction. also -37pct steps. MTP dead under this harness metric
 27	1722e3c	611705b	3.519800	0.080500	46343	1589	833.1	discard	attn_sink	custom mask drops SDPA causal fast-path: -23pct steps, sink gains nowhere near enough
 28	611705b	611705b	3.438087	-0.001213	42465	2216	1161.8	rerun?	n_layer11	capacity-for-steps again: +7pct steps, beats best by 0.0012 (borderline). confirming
-28b	a3689c5	611705b	3.435437	-0.003863	42465	2218	1162.9	keep	n_layer11_confirm	CONFIRMED: both runs beat best (3.4381, 3.4354). NEW BEST 3.4354. -9.5M params, +7pct steps
+28b	a3689c5	611705b	3.435437	-0.003863	42465	2218	1162.9	keep	n_layer11_confirm	CONFIRMED: both runs beat best (3.4381, 3.4354). NEW BEST 3.4354. -9.5M params, +7pct steps [class=TRANSFERABLE]
 29	f8584ed	a3689c5	3.436127	0.000690	40890	2373	1244.1	discard	n_layer10	depth curve: 12=3.4393 11=3.4354 10=3.4361. 11 is optimum, 10 is a tie. depth line closed
 30	f8584ed	a3689c5	3.519724	0.084287	41823	2348	1231.0	discard	weight_sharing_6of11	shared capacity hit 10x larger than step gain. line closed
-31	6bf0fa2	a3689c5	3.415827	-0.019610	42463	2505	1313.3	keep	seq_curriculum_800x512	CLEAN KEEP (beats best-eps 3.4290): +13pct steps, curriculum through easy region. NEW BEST 3.4158
+31	6bf0fa2	a3689c5	3.415827	-0.019610	42463	2505	1313.3	keep	seq_curriculum_800x512	CLEAN KEEP (beats best-eps 3.4290): +13pct steps, curriculum through easy region. NEW BEST 3.4158 [class=TRANSFERABLE]
 31b	24281a0	6bf0fa2	3.409866	-0.005961	42463	2655	1392.0	chain	seq_curriculum_1200	chain 2: 800=3.4158 1200=3.4099, still descending. probing 1600
 31c	24281a0	6bf0fa2	3.412860	-0.002967	42463	2792	1463.8	chain	seq_curriculum_1600	curve turned: 800=3.4158 1200=3.4099 1600=3.4129. optimum 1200, confirming
-31d	b2ca8da	6bf0fa2	3.410179	-0.005648	42463	2651	1389.9	keep	seq_curriculum_1200_confirm	CONFIRMED: both runs beat 3.4158 (3.4099, 3.4102). NEW BEST 3.4099. chain closed 4/4, two bests produced
+31d	b2ca8da	6bf0fa2	3.410179	-0.005648	42463	2651	1389.9	keep	seq_curriculum_1200_confirm	CONFIRMED: both runs beat 3.4158 (3.4099, 3.4102). NEW BEST 3.4099. chain closed 4/4, two bests produced [class=TRANSFERABLE]
 32	f4c6feb	b2ca8da	3.407414	-0.002452	42455	2754	1443.9	rerun?	seq_curriculum_len384	len knob: 384 beats 512 by 0.0025 (borderline). confirming
-32b	c9e6600	b2ca8da	3.407692	-0.002174	42455	2757	1445.5	keep	seq_curriculum_len384_confirm	CONFIRMED: both beat 3.4099 (3.4074, 3.4077). NEW BEST 3.4074
+32b	c9e6600	b2ca8da	3.407692	-0.002174	42455	2757	1445.5	keep	seq_curriculum_len384_confirm	CONFIRMED: both beat 3.4099 (3.4074, 3.4077). NEW BEST 3.4074 [class=TRANSFERABLE]
 33	4b3430b	c9e6600	3.413088	0.005674	42480	2847	1492.6	discard	seq_curriculum_len256	len curve turned: 512=3.4099 384=3.4074 256=3.4131. 384 optimum. len line closed
 34	4b3430b	c9e6600	3.405524	-0.001890	42463	2703	1417.2	rerun?	seq_curriculum_3stage	3-stage 384/640/1024 beats 2-stage by 0.0019 (borderline). confirming
 34b	4b3430b	c9e6600	3.407821	0.000381	42463	2706	1418.7	discard	seq_curriculum_3stage_confirm	rerun misses best by 0.0004: statistical tie, not a win. 2-stage 1200@384 stays crowned. curriculum family closed
 35	4b3430b	c9e6600	3.404696	-0.002718	42455	2754	1443.9	rerun?	warmup100	warmup 250-100: +150 full-LR steps, beats best by 0.0027 (borderline). confirming
-35b	52df558	c9e6600	3.406199	-0.001215	42455	2748	1440.7	keep	warmup100_confirm	CONFIRMED: both beat 3.4074 (3.4047, 3.4062). NEW BEST 3.4047. override-pass code lands with this keep
+35b	52df558	c9e6600	3.406199	-0.001215	42455	2748	1440.7	keep	warmup100_confirm	CONFIRMED: both beat 3.4074 (3.4047, 3.4062). NEW BEST 3.4047. override-pass code lands with this keep [class=BUDGET-ARTIFACT]
 36	956e334	52df558	3.406660	0.001964	42455	2754	1443.9	discard	warmup50	warmup curve turned: 250=3.4074 100=3.4047 50=3.4067. optimum 100, knob closed
