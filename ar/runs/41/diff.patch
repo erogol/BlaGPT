@@ -1,0 +1,29 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index 52aec55..7ad6f84 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -113,6 +113,7 @@ class GPTConfig(Coqpit):
+     seq_curriculum_steps: int = 0
+     seq_curriculum_len: int = 512
+     warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
++    compile_mode: str = "default"  # torch.compile mode (compile time is outside the AR budget)
+ 
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+diff --git a/bla_gpt/train_ar.py b/bla_gpt/train_ar.py
+index e4bbec2..e97aade 100644
+--- a/bla_gpt/train_ar.py
++++ b/bla_gpt/train_ar.py
+@@ -271,7 +271,11 @@ if __name__ == "__main__":
+     model = model.cuda()
+ 
+     if args.compile_model:
+-        model = torch.compile(model)
++        _compile_mode = getattr(model_config, "compile_mode", "default")
++        if _compile_mode and _compile_mode != "default":
++            model = torch.compile(model, mode=_compile_mode)
++        else:
++            model = torch.compile(model)
+ 
+     model_size = (
+         sum(p.numel() for p in model.parameters()) * 4 / (1024**2)
