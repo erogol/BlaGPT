@@ -1,0 +1,31 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index 1b62c8d..52aec55 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -112,6 +112,7 @@ class GPTConfig(Coqpit):
+     # Sequence-length curriculum (experiment: seq-curriculum)
+     seq_curriculum_steps: int = 0
+     seq_curriculum_len: int = 512
++    warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
+ 
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+diff --git a/bla_gpt/train_ar.py b/bla_gpt/train_ar.py
+index 42bbc07..e4bbec2 100644
+--- a/bla_gpt/train_ar.py
++++ b/bla_gpt/train_ar.py
+@@ -212,6 +212,14 @@ if __name__ == "__main__":
+     if cli_args.config:
+         model_config.load_json(cli_args.config)
+ 
++    # Second override pass: allow experiment configs to reach training
++    # hyperparameters. Frozen evaluation keys are excluded (guarded also
++    # by frozen_check.sh).
++    _frozen_keys = {"val_tokens", "val_loss_every", "num_iterations", "save_every", "save_best_model", "input_val_bin"}
++    for key, value in model_config.to_dict().items():
++        if hasattr(args, key) and key not in _frozen_keys:
++            setattr(args, key, value)
++
+     # autoresearch harness overrides (FROZEN): no checkpointing (torch.save
+     # of full state would eat wall time), fixed val cadence handled below.
+     args.save_best_model = False
