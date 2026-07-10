@@ -22,7 +22,7 @@ Run tag: `jul8` · branch `autoresearch/jul8` · pod `erogol-run` (8× H100)
 Spec: /root/.keche/specs/blagpt-autoresearch.md (v0.2, on Keche host)
 Metric: `final_val_loss` from `/nvme/ar/runs/<n>/run.log` (lower is better).
 Budget: AR_TIME_BUDGET=600 s pure training time (compile + val excluded).
-Current best: 3.4158 (exp 31, seq-curriculum + 11 layers + no PLTE + rope_theta 1e6 + MHA, commit 6bf0fa2). EPSILON = 0.0064.
+Current best: 3.4099 (exp 31b, seq-curriculum-1200 + 11 layers + no PLTE + rope_theta 1e6 + MHA, commit b2ca8da). EPSILON = 0.0064.
 
 ## Editable surface — everything is fair game
 
