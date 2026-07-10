@@ -212,6 +212,14 @@ if __name__ == "__main__":
     if cli_args.config:
         model_config.load_json(cli_args.config)
 
+    # Second override pass: allow experiment configs to reach training
+    # hyperparameters. Frozen evaluation keys are excluded (guarded also
+    # by frozen_check.sh).
+    _frozen_keys = {"val_tokens", "val_loss_every", "num_iterations", "save_every", "save_best_model", "input_val_bin"}
+    for key, value in model_config.to_dict().items():
+        if hasattr(args, key) and key not in _frozen_keys:
+            setattr(args, key, value)
+
     # autoresearch harness overrides (FROZEN): no checkpointing (torch.save
     # of full state would eat wall time), fixed val cadence handled below.
     args.save_best_model = False
