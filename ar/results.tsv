@@ -46,3 +46,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 32	f4c6feb	b2ca8da	3.407414	-0.002452	42455	2754	1443.9	rerun?	seq_curriculum_len384	len knob: 384 beats 512 by 0.0025 (borderline). confirming
 32b	c9e6600	b2ca8da	3.407692	-0.002174	42455	2757	1445.5	keep	seq_curriculum_len384_confirm	CONFIRMED: both beat 3.4099 (3.4074, 3.4077). NEW BEST 3.4074
 33	4b3430b	c9e6600	3.413088	0.005674	42480	2847	1492.6	discard	seq_curriculum_len256	len curve turned: 512=3.4099 384=3.4074 256=3.4131. 384 optimum. len line closed
+34	4b3430b	c9e6600	3.405524	-0.001890	42463	2703	1417.2	rerun?	seq_curriculum_3stage	3-stage 384/640/1024 beats 2-stage by 0.0019 (borderline). confirming
