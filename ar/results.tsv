@@ -33,3 +33,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 24	59f33c3	611705b	3.438642	-0.000635	45029	2056	1077.9	rerun?	no_plte_res_weights	beats best by 0.0007 (borderline). confirming
 24b	pending	611705b	3.440217	0.000783	45029	2054	1076.9	discard	no_plte_res_weights_confirm	rerun worse than best (3.4402 > 3.4393). fluke run 1. discard
 25	611705b	611705b	3.814919	0.375619	48624	993	520.6	discard	moe_ffn	worst of session: 2x slower (993 steps), aux_loss dominates, routing did not converge in budget
+26	f5749ed	611705b	4.386320	0.947020	55045	1296	679.5	discard	mtp_n2	metric averages both heads; t+2 head ~1.9 nats harder so incomparable by construction. also -37pct steps. MTP dead under this harness metric
