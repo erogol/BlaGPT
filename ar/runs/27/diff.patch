@@ -1,0 +1,80 @@
+diff --git a/bla_gpt/attentions.py b/bla_gpt/attentions.py
+index e298e55..998b15b 100644
+--- a/bla_gpt/attentions.py
++++ b/bla_gpt/attentions.py
+@@ -173,6 +173,14 @@ class Attention(nn.Module):
+         # Causal mask
+         self.mask = None
+ 
++        # Learnable attention sink (experiment: attn-sink)
++        self.use_attn_sink = getattr(config, "use_attn_sink", False)
++        if self.use_attn_sink:
++            self.sink_k = nn.Parameter(torch.zeros(1, self.n_head, 1, self.head_dim))
++            self.sink_v = nn.Parameter(torch.zeros(1, self.n_head, 1, self.head_dim))
++            nn.init.normal_(self.sink_k, std=0.02)
++            nn.init.normal_(self.sink_v, std=0.02)
++
+         self.set_layers(config)
+ 
+     def set_layers(self, config):
+@@ -214,6 +222,21 @@ class Attention(nn.Module):
+         # Prepare attention inputs
+         q, k, v = self._prepare_qkv(q, k, v)
+ 
++        # Prepend learnable attention sink (experiment: attn-sink).
++        # Applied after RoPE so the sink is position-free (StreamingLLM-style).
++        if self.use_attn_sink:
++            k = torch.cat([self.sink_k.expand(B, -1, -1, -1).to(k.dtype), k], dim=2)
++            v = torch.cat([self.sink_v.expand(B, -1, -1, -1).to(v.dtype), v], dim=2)
++            if (
++                self.mask is None
++                or self.mask.size(-2) != T_q
++                or self.mask.size(-1) != T + 1
++                or self.mask.device != q.device
++            ):
++                _causal = torch.tril(torch.ones(T_q, T, dtype=torch.bool, device=q.device))
++                _sink_col = torch.ones(T_q, 1, dtype=torch.bool, device=q.device)
++                self.mask = torch.cat([_sink_col, _causal], dim=1).view(1, 1, T_q, T + 1)
++
+         # Compute attention
+         if self.flash and self.soft_cap == 0 and not self.use_softpick:
+             y = self._flash_attention(q, k, v)
+@@ -294,7 +317,7 @@ class Attention(nn.Module):
+         if self.soft_cap > 0:
+             att = soft_cap(att, self.soft_cap)
+ 
+-        att = att.masked_fill(self.mask[:, :, :T_q, :T] == 0, float("-inf"))
++        att = att.masked_fill(self.mask[:, :, :T_q, : k.size(-2)] == 0, float("-inf"))
+         if self.use_softpick:
+             att = softpick(att, dim=-1)
+         else:
+@@ -325,11 +348,13 @@ class ExclusiveSelfAttention(Attention):
+ 
+     def _flash_attention(self, q, k, v):
+         y = super()._flash_attention(q, k, v)
+-        return self._apply_exclusion(y, v)
++        # With a prepended attention sink, v has one extra leading position;
++        # exclusion must use the query-aligned tail of v.
++        return self._apply_exclusion(y, v[:, :, -y.size(2):, :])
+ 
+     def _manual_attention(self, q, k, v, T_q, T):
+         y = super()._manual_attention(q, k, v, T_q, T)
+-        return self._apply_exclusion(y, v)
++        return self._apply_exclusion(y, v[:, :, -y.size(2):, :])
+ 
+ 
+ class MultiHeadLatentAttention(Attention):
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index d209cc1..737202c 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -109,6 +109,9 @@ class GPTConfig(Coqpit):
+     )
+     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
+ 
++    # Learnable attention sink (experiment: attn-sink)
++    use_attn_sink: bool = False
++
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+     use_engram: bool = False
