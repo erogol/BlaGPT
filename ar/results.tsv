@@ -44,3 +44,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 31c	24281a0	6bf0fa2	3.412860	-0.002967	42463	2792	1463.8	chain	seq_curriculum_1600	curve turned: 800=3.4158 1200=3.4099 1600=3.4129. optimum 1200, confirming
 31d	b2ca8da	6bf0fa2	3.410179	-0.005648	42463	2651	1389.9	keep	seq_curriculum_1200_confirm	CONFIRMED: both runs beat 3.4158 (3.4099, 3.4102). NEW BEST 3.4099. chain closed 4/4, two bests produced
 32	f4c6feb	b2ca8da	3.407414	-0.002452	42455	2754	1443.9	rerun?	seq_curriculum_len384	len knob: 384 beats 512 by 0.0025 (borderline). confirming
+32b	pending	b2ca8da	3.407692	-0.002174	42455	2757	1445.5	keep	seq_curriculum_len384_confirm	CONFIRMED: both beat 3.4099 (3.4074, 3.4077). NEW BEST 3.4074
