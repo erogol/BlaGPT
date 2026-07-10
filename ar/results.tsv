@@ -55,3 +55,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 38	956e334	52df558	3.422904	0.018208	40662	2863	1501.0	discard	width704	width cut hurts 10x more than depth cut. 768 load-bearing. width closed
 39	956e334	52df558	3.426424	0.021728	42455	2871	1505.2	discard	muon_ns3	only +4pct steps, orthogonalization quality collapse. NS=5 earns its cost. line closed
 40	956e334	52df558	3.405975	0.001279	42426	2751	1442.3	discard	head_dim128	tie, no step gain either. head shape quality-neutral. closed
+41	956e334	52df558	3.410522	0.005826	48764	2723	1427.6	discard	compile_max_autotune	autotune picked SLOWER kernels at steady state: -31 steps, +6GB VRAM. default compile wins. closed
