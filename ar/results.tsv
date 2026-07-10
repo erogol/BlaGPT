@@ -1,0 +1,30 @@
+n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
+0	9740ded	baseline	3.452022	0.000000	46721	1875	102.8	keep	baseline	3 runs: mean=3.455141 sigma=0.003187 eps=0.006374
+1	9740ded	9740ded	3.480689	-0.028667	41981	2191	1148.7	discard	parallel_blocks	14pct faster but worse quality (335M vs 495M params)
+2	9740ded	9740ded	3.455125	0.003103	46710	1872	981.5	discard	engram_all_layers	within noise, 6 layers is sufficient
+3	9740ded	9740ded	3.457220	0.005198	45316	1908	1000.3	discard	plte_dim_128	slightly worse, 256 is correct dim
+4	9740ded	9740ded	3.446940	-0.005082	48778	1812	950.0	rerun?	full_mha	borderline (within eps), rerunning to confirm
+4b	f32b8a3	9740ded	3.446820	-0.005202	48769	1816	952.1	keep	full_mha_rerun	confirmed: both runs beat baseline. NEW BEST
+5	f32b8a3	f32b8a3	3.448000	0.001180	49358	1784	935.3	discard	mha_plus_ptob	worse than MHA alone, +39M params for nothing
+6	f32b8a3	f32b8a3	3.446291	-0.000529	48769	1811	949.5	rerun?	mha_plus_canon	borderline, free (no extra params/vram), rerunning
+6b	f32b8a3	f32b8a3	3.449039	0.002219	48769	1816	952.1	discard	mha_plus_canon_rerun	rerun worse, first run was noise. canon doesnt stack
+7	f32b8a3	f32b8a3	3.447752	0.000932	48769	1804	945.8	discard	mha_lr_1.4x	1.4x LR overshoots, 0.001 is well-tuned
+8	f32b8a3	f32b8a3	3.446609	-0.000211	48769	1806	946.9	discard	mha_lr_0.7x	within noise, LR well-tuned in 0.0007-0.001 range
+9	f32b8a3	f32b8a3	3.443671	-0.003149	48769	1816	952.1	rerun?	rope_theta_1e6	borderline (-0.0031, within eps), config-only on MHA best. rerunning as 9b
+9b	b321d27	f32b8a3	3.442740	-0.004080	48769	1816	952.1	keep	rope_theta_1e6_rerun	confirmed: both runs beat best (3.4437, 3.4427). NEW BEST
+14	82df040	b321d27	3.458004	0.015264	49935	1724	903.9	chain	value_embeddings	chain 1/4: lambda0.5 first3+last3 layers, +38.6M params, 4.7pct fewer steps. tune lambda next
+14b	82df040	b321d27	3.456745	0.014005	49935	1733	908.6	chain	value_embeddings_l0.1	chain 2/4: lambda 0.1 vs 0.5 flat (-0.0013, noise). lambda not the issue; next test VE replacing PLTE (redundancy hyp)
+14c	82df040	b321d27	3.454357	0.011617	46100	1958	1026.6	chain	ve_replaces_plte	chain 3/4: PLTE off frees 159M params, +13pct steps, but VE alone worse than PLTE. final: lambda 0.5 w/o PLTE
+14d	82df040	b321d27	3.454438	0.011698	46100	1964	1029.7	discard	value_embeddings_final	chain 4/4 verdict: VE flat at 3.4544 regardless of lambda; does not replace PLTE nor stack. DISCARD idea
+15	b321d27	b321d27	3.447489	0.004749	48769	1817	952.6	discard	rope_theta_1e7	not monotone: 1e6 is near-optimal. lost by <2eps, rope variants slot stays open (3e5/3e6)
+16	b321d27	b321d27	3.462706	0.019966	52104	1745	914.9	discard	gated_attention	fixed-step README win does not transfer to time budget: +7M params, 4pct fewer steps, clearly worse
+17	5a3e301	b321d27	3.460022	0.017282	50846	1812	950.0	chain	ema_eval	chain 1/4: decay0.98/every5 = 250-step horizon lags LR anneal (~100 steps). tune horizon next
+17b	5a3e301	b321d27	3.457479	0.014739	50846	1782	934.3	chain	ema_d0.99_every1	chain 2/4: horizon fix only -0.0025. EMA redundant WITH anneal; chain 3 tests EMA REPLACING anneal
+17c	5a3e301	b321d27	3.459661	0.016921	50846	1790	938.5	discard	ema_d0.995_every1	chain 3/4 verdict: trajectory 3.4600->3.4575->3.4597 diverging. EMA fights warmdown. chain closed early
+18	b321d27	b321d27	3.446026	0.003286	48769	1813	950.5	discard	rope_theta_3e5	theta map complete: 10k 3.4468, 3e5 3.4460, 1e6 3.4427 (opt), 1e7 3.4475. exploit line exhausted
+19	b321d27	b321d27	3.443685	0.000945	48870	1802	944.8	discard	res_weights	statistical tie with best (+0.0009, well under eps) but does not beat it. near-miss, variants slot open
+20	0876856	b321d27	3.457022	0.014282	48864	1813	950.5	chain	unet_skips	chain 1/4: w-init 1.0. smoke strongly better (6.13 vs 6.24) but 600s worse: early boost washes out, late contamination. tune init next
+20b	0876856	b321d27	3.444610	0.001870	48864	1804	945.8	chain	unet_init0.25	chain 2/4: -0.0124 vs run1, strong trajectory. direction says lower init; next 0.1
+20c	0876856	b321d27	3.445390	0.002650	48864	1808	947.9	discard	unet_init0.1	chain 3/4 verdict: knob curve 1.0=3.4570 0.25=3.4446 0.1=3.4454 plateaus at tie-with-best. closed early. best invent line so far, combo candidate
+21	b321d27	b321d27	3.440910	-0.001830	44930	2074	1087.4	rerun?	no_plte	PLTE removal: -159M params, +14pct steps, beats best by 0.0018 (borderline). confirming
+21b	611705b	b321d27	3.439277	-0.003463	44930	2074	1087.4	keep	no_plte_confirm	CONFIRMED: both runs beat best (3.4409, 3.4393). NEW BEST 3.4393. -159M params, +14pct steps

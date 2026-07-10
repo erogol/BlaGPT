@@ -1,0 +1,68 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index d209cc1..165860d 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -109,6 +109,13 @@ class GPTConfig(Coqpit):
+     )
+     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
+ 
++    # EMA-of-weights evaluation (experiment: averaging). EMA is updated during
++    # training (cost inside the time budget); final validation runs on the
++    # EMA weights instead of the last iterate.
++    use_ema_eval: bool = False
++    ema_decay: float = 0.98
++    ema_every: int = 5  # update EMA every N steps
++
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+     use_engram: bool = False
+diff --git a/bla_gpt/train_ar.py b/bla_gpt/train_ar.py
+index 6056753..c6b58fd 100644
+--- a/bla_gpt/train_ar.py
++++ b/bla_gpt/train_ar.py
+@@ -365,6 +365,13 @@ if __name__ == "__main__":
+ 
+     training_time_ms = 0
+     best_val_loss = float("inf")
++
++    # --- EMA of weights (experiment: averaging) ---
++    _ema_enabled = bool(getattr(model_config, "use_ema_eval", False))
++    _ema_decay = float(getattr(model_config, "ema_decay", 0.98))
++    _ema_every = max(1, int(getattr(model_config, "ema_every", 5)))
++    _ema_state = {}
++
+     # start the clock
+     torch.cuda.synchronize()
+     t0 = time.time()
+@@ -512,6 +519,17 @@ if __name__ == "__main__":
+             opt.step()
+         # null the gradients
+         model.zero_grad(set_to_none=True)
++
++        # --- EMA update (experiment: averaging) — runs inside the clock ---
++        if _ema_enabled and step >= 10 and step % _ema_every == 0:
++            with torch.no_grad():
++                for _k, _v in raw_model.state_dict().items():
++                    if _k not in _ema_state:
++                        _ema_state[_k] = _v.detach().clone().float()
++                    elif _v.dtype.is_floating_point:
++                        _ema_state[_k].mul_(_ema_decay).add_(_v.float(), alpha=1.0 - _ema_decay)
++                    else:
++                        _ema_state[_k].copy_(_v)
+         # --------------- TRAINING SECTION END -------------------
+         # everything that follows now is just diagnostics, prints, logging, etc.
+ 
+@@ -553,6 +571,13 @@ if __name__ == "__main__":
+             torch.cuda.synchronize()
+             training_time_ms += 1000 * (time.time() - t0)
+             model.eval()
++            # --- EMA swap for final validation (experiment: averaging) ---
++            # Pure weight copy; EMA compute itself ran inside the clock.
++            if _ema_enabled and _ema_state:
++                with torch.no_grad():
++                    for _k, _v in raw_model.state_dict().items():
++                        if _k in _ema_state:
++                            _v.copy_(_ema_state[_k].to(_v.dtype))
+             val_loader.reset()
+             val_loss = 0.0
+             with torch.no_grad():
