@@ -480,10 +480,19 @@ if __name__ == "__main__":
 
         # --------------- TRAINING SECTION BEGIN -----------------
         model.train()
+        # Sequence-length curriculum (experiment: seq-curriculum): train the
+        # first N steps on a shorter prefix for faster early steps; validation
+        # always runs at full length so the metric is unchanged.
+        _cur_steps = getattr(model_config, "seq_curriculum_steps", 0)
+        _cur_len = getattr(model_config, "seq_curriculum_len", 512)
+        _use_short = _cur_steps > 0 and step < _cur_steps
         for i in range(1, train_accumulation_steps + 1):
             # forward pass
             with ctx:
-                _, loss = model(x, y)
+                if _use_short:
+                    _, loss = model(x[:, :_cur_len].contiguous(), y[:, :_cur_len].contiguous())
+                else:
+                    _, loss = model(x, y)
                 metrics = None
                 if type(loss) is dict:
                     metrics = {k: v for k, v in loss.items() if k != "total"}
