@@ -80,6 +80,6 @@
     "weight_decay": 0.0,
     "use_cautious_weight_decay": false
   },
-  "seq_curriculum_steps": 800,
+  "seq_curriculum_steps": 120,
   "seq_curriculum_len": 512
 }
