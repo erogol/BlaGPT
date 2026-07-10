@@ -1,7 +1,7 @@
 {
   "block_size": 1024,
   "vocab_size": 50304,
-  "n_layer": 11,
+  "n_layer": 12,
   "n_head": 12,
   "n_embd": 768,
   "n_latentd": 0,
@@ -79,5 +79,6 @@
     "eps": 1e-08,
     "weight_decay": 0.0,
     "use_cautious_weight_decay": false
-  }
+  },
+  "use_attn_sink": true
 }

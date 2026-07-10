@@ -35,3 +35,5 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 25	611705b	611705b	3.814919	0.375619	48624	993	520.6	discard	moe_ffn	worst of session: 2x slower (993 steps), aux_loss dominates, routing did not converge in budget
 26	f5749ed	611705b	4.386320	0.947020	55045	1296	679.5	discard	mtp_n2	metric averages both heads; t+2 head ~1.9 nats harder so incomparable by construction. also -37pct steps. MTP dead under this harness metric
 27	1722e3c	611705b	3.519800	0.080500	46343	1589	833.1	discard	attn_sink	custom mask drops SDPA causal fast-path: -23pct steps, sink gains nowhere near enough
+28	611705b	611705b	3.438087	-0.001213	42465	2216	1161.8	rerun?	n_layer11	capacity-for-steps again: +7pct steps, beats best by 0.0012 (borderline). confirming
+28b	f728a5d	611705b	3.435437	-0.003863	42465	2218	1162.9	keep	n_layer11_confirm	CONFIRMED: both runs beat best (3.4381, 3.4354). NEW BEST 3.4354. -9.5M params, +7pct steps

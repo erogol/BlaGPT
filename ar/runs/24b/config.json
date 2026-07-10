@@ -1,7 +1,7 @@
 {
   "block_size": 1024,
   "vocab_size": 50304,
-  "n_layer": 11,
+  "n_layer": 12,
   "n_head": 12,
   "n_embd": 768,
   "n_latentd": 0,
@@ -23,7 +23,7 @@
   "zero_init_proj_layers": true,
   "rmsnorm_before_qk": true,
   "pos_encoding": "rotary",
-  "use_res_weights": false,
+  "use_res_weights": true,
   "use_qkv_bias": false,
   "use_pre_post_norm": false,
   "rope_theta": 1000000.0,
