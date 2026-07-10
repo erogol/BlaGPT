@@ -30,3 +30,5 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 21b	611705b	b321d27	3.439277	-0.003463	44930	2074	1087.4	keep	no_plte_confirm	CONFIRMED: both runs beat best (3.4409, 3.4393). NEW BEST 3.4393. -159M params, +14pct steps
 22	611705b	611705b	3.476925	0.037648	44930	1992	1044.4	discard	z_loss_1e-4	worst of day: hurts quality AND costs 4pct steps. z_loss line dead
 23	0c851a5	611705b	3.442804	0.003565	45028	2058	1079.0	discard	no_plte_unet0.25	unet combo worse than no_plte alone. early boost still washes; residual contamination dominates
+24	59f33c3	611705b	3.438642	-0.000635	45029	2056	1077.9	rerun?	no_plte_res_weights	beats best by 0.0007 (borderline). confirming
+24b	pending	611705b	3.440217	0.000783	45029	2054	1076.9	discard	no_plte_res_weights_confirm	rerun worse than best (3.4402 > 3.4393). fluke run 1. discard
