@@ -77,3 +77,7 @@ Best pick for EXPLORE slot: MTP (n_predict=2) from queue — quota says explore 
 ## Exp 26 (MTP n_predict=2) postmortem
 - DISCARD 4.3863: harness final_val_loss averages ALL heads; the t+2 head is ~1.9 nats harder -> MTP cannot win under this metric BY CONSTRUCTION (not a quality signal about MTP itself). Also -37% steps, +10GB VRAM.
 - Queue is now fully drained (10 z_loss, 11 softpick-deprioritized, 12 MTP all resolved).
+
+## Exp 27 (attention sink) postmortem
+- DISCARD 3.5198 (+0.08): the custom bool mask (sink col + causal) drops SDPA off the causal fast-path -> -23% steps. Sink mechanism itself may be neutral; the kernel cost is what kills it. Same lesson family as MoE: under 600s wall-clock, anything that touches the attention kernel path must keep the flash fast-path.
+- Next exploit hypothesis from the winning pattern (trade capacity for steps): n_layer 12->11.
