@@ -109,6 +109,10 @@ class GPTConfig(Coqpit):
     )
     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
 
+    # Sequence-length curriculum (experiment: seq-curriculum)
+    seq_curriculum_steps: int = 0
+    seq_curriculum_len: int = 512
+
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
     use_engram: bool = False
