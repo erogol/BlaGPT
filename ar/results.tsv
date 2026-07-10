@@ -37,3 +37,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 27	1722e3c	611705b	3.519800	0.080500	46343	1589	833.1	discard	attn_sink	custom mask drops SDPA causal fast-path: -23pct steps, sink gains nowhere near enough
 28	611705b	611705b	3.438087	-0.001213	42465	2216	1161.8	rerun?	n_layer11	capacity-for-steps again: +7pct steps, beats best by 0.0012 (borderline). confirming
 28b	a3689c5	611705b	3.435437	-0.003863	42465	2218	1162.9	keep	n_layer11_confirm	CONFIRMED: both runs beat best (3.4381, 3.4354). NEW BEST 3.4354. -9.5M params, +7pct steps
+29	f8584ed	a3689c5	3.436127	0.000690	40890	2373	1244.1	discard	n_layer10	depth curve: 12=3.4393 11=3.4354 10=3.4361. 11 is optimum, 10 is a tie. depth line closed
