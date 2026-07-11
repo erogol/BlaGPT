@@ -116,6 +116,7 @@ class GPTConfig(Coqpit):
     device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
     mlp_expand: int = 4  # MLP hidden expansion factor (Primer_MLP)
     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
+    attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -844,16 +845,23 @@ class GPT(nn.Module):
             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
 
         _attn_res = getattr(self.config, "use_attn_res", False) and not self.config.use_hyper_connections
+        _ar_bs = getattr(self.config, "attn_res_block_size", 0)
         if _attn_res:
-            _ar_vs = [x]  # v0 = embedding output
+            if _ar_bs > 0:
+                _ar_blocks = []       # completed block sums
+                _ar_partial = x       # current block partial (starts with embedding)
+                _ar_vs = None
+            else:
+                _ar_vs = [x]  # v0 = embedding output
         for layer_idx, block in enumerate(self.transformer.h):
             if _attn_res:
+                _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
                 _w = self.attn_res_w[layer_idx]
-                _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _ar_vs], dim=0)  # (L, b, t)
+                _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)  # (L, b, t)
                 _alpha = _scores.softmax(dim=0)
-                x = _ar_vs[0] * _alpha[0].unsqueeze(-1)
-                for _i in range(1, len(_ar_vs)):
-                    x = x + _ar_vs[_i] * _alpha[_i].unsqueeze(-1)
+                x = _srcs[0] * _alpha[0].unsqueeze(-1)
+                for _i in range(1, len(_srcs)):
+                    x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
             # Apply engram based on variant
             if self.engram is not None:
                 if self.config.use_hyper_connections:
@@ -870,17 +878,24 @@ class GPT(nn.Module):
             if _attn_res:
                 _h_in = x
                 x = block(x, token_ids=idx)
-                _ar_vs.append(x - _h_in)
+                if _ar_bs > 0:
+                    _ar_partial = _ar_partial + (x - _h_in)
+                    if (layer_idx + 1) % _ar_bs == 0:
+                        _ar_blocks.append(_ar_partial)
+                        _ar_partial = torch.zeros_like(_ar_partial)
+                else:
+                    _ar_vs.append(x - _h_in)
             else:
                 x = block(x, token_ids=idx)
 
         if _attn_res:
+            _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
             _w = self.attn_res_w[self.config.n_layer]
-            _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _ar_vs], dim=0)
+            _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)
             _alpha = _scores.softmax(dim=0)
-            x = _ar_vs[0] * _alpha[0].unsqueeze(-1)
-            for _i in range(1, len(_ar_vs)):
-                x = x + _ar_vs[_i] * _alpha[_i].unsqueeze(-1)
+            x = _srcs[0] * _alpha[0].unsqueeze(-1)
+            for _i in range(1, len(_srcs)):
+                x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
 
         if self.config.use_hyper_connections:
             x = x.sum(dim=2)
