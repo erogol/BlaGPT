@@ -68,3 +68,5 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 49	956e334	52df558	3.442099	0.037503	47192	2444	1281.4	discard	diff_attn_v2	doubled query heads too costly: -275 steps, +7MB VRAM. architecture overhead kills budget
 50	956e334	52df558	ERROR	-	-	-	-	discard	forgetting_attn	self.mask=None bug in _forgetting_attention: mask not initialized before first call. code bug, not config. skipped
 51	956e334	52df558	3.422681	0.018085	45414	2665	1397.2	discard	kvshifting_attn	KV shift: +VRAM, -94 steps, no quality gain. attention sweep exhausted
+51	956e334	52df558	SIGSEGV	-	-	-	-	discard	kvshifting_attn	SIGSEGV rank-init fluke, relaunching
+52	956e334	52df558	3.465228	0.061032	42455	2245	1177.0	discard	weight_decay_0.1	L2 with Muon harmful: -578 steps, Muon orthogonalization fights L2 penalty. closed
