@@ -60,3 +60,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 43	956e334	52df558	3.407450	0.002954	42457	2719	1425.5	discard	res_weights_3rd	res_weights closed: 3rd audition still a tie (3.4075 vs 3.4047). question answered, mechanism discarded.
 44	956e334	52df558	SIGSEGV	-	-	-	-	discard	mqa_n_kv1	SIGSEGV (rank-init infra fluke), relaunching
 44	956e334	52df558	3.453672	0.049176	41329	2828	1482.7	discard	mqa_n_kv1	MQA severely hurts quality (3.4537 +0.049). KV bottleneck too extreme. closed
+45	956e334	52df558	3.404227	-0.000469	42455	2823	1480.1	rerun?	nobias	bias=False: beats best by 0.0005 (borderline), +2.5pct steps. confirming
