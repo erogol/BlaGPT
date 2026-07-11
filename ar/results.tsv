@@ -80,3 +80,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 58	HEAD	52df558	3.408533	-	42455	2739	1436.0	debug	device_batch64_noop	BUG: GPTConfig lacks device_batch_size field, Coqpit dropped key silently (Accumulation steps: 2 in log). field added, rerunning
 58	HEAD	52df558	OOM	-	-	-	-	discard	device_batch64	OOM at seq1024 phase even with expandable_segments (needs +12GB). db=64 does not fit, only 32 valid. BUDGET-ARTIFACT line closed
 59	HEAD	52df558	3.410335	0.005639	39986	3028	1587.5	chain	activation_primer	ARCH chain 1: relu2 frees 26M params, +284 steps, near-tie (+0.0056). activation family has signal, probing polynorm
+60	HEAD	52df558	3.471758	0.067062	42035	2801	1468.5	discard	activation_polynorm	ARCH chain 2: polynorm badly loses (+0.067). primer still the only near-tie
