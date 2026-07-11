@@ -113,6 +113,7 @@ class GPTConfig(Coqpit):
     seq_curriculum_steps: int = 0
     seq_curriculum_len: int = 512
     warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
+    device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
