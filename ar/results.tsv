@@ -58,3 +58,5 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 41	956e334	52df558	3.410522	0.005826	48764	2723	1427.6	discard	compile_max_autotune	autotune picked SLOWER kernels at steady state: -31 steps, +6GB VRAM. default compile wins. closed
 42	956e334	52df558	3.410168	0.005472	42455	2931	1536.7	discard	seq_curriculum_1600x384	joint corner: steps-opt does not shift later at len 384. 1200@384 stands. family fully mapped
 43	956e334	52df558	3.407450	0.002954	42457	2719	1425.5	discard	res_weights_3rd	res_weights closed: 3rd audition still a tie (3.4075 vs 3.4047). question answered, mechanism discarded.
+44	956e334	52df558	SIGSEGV	-	-	-	-	discard	mqa_n_kv1	SIGSEGV (rank-init infra fluke), relaunching
+44	956e334	52df558	3.453672	0.049176	41329	2828	1482.7	discard	mqa_n_kv1	MQA severely hurts quality (3.4537 +0.049). KV bottleneck too extreme. closed
