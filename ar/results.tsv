@@ -70,3 +70,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 51	956e334	52df558	3.422681	0.018085	45414	2665	1397.2	discard	kvshifting_attn	KV shift: +VRAM, -94 steps, no quality gain. attention sweep exhausted
 51	956e334	52df558	SIGSEGV	-	-	-	-	discard	kvshifting_attn	SIGSEGV rank-init fluke, relaunching
 52	956e334	52df558	3.465228	0.061032	42455	2245	1177.0	discard	weight_decay_0.1	L2 with Muon harmful: -578 steps, Muon orthogonalization fights L2 penalty. closed
+53	956e334	52df558	3.528596	0.124400	44071	2676	1403.0	discard	dytnorm	tanh saturation destroys quality: +0.124. RMSNorm is optimal, closed
