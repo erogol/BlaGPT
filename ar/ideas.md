@@ -81,3 +81,67 @@ Best pick for EXPLORE slot: MTP (n_predict=2) from queue — quota says explore 
 ## Exp 27 (attention sink) postmortem
 - DISCARD 3.5198 (+0.08): the custom bool mask (sink col + causal) drops SDPA off the causal fast-path -> -23% steps. Sink mechanism itself may be neutral; the kernel cost is what kills it. Same lesson family as MoE: under 600s wall-clock, anything that touches the attention kernel path must keep the flash fast-path.
 - Next exploit hypothesis from the winning pattern (trade capacity for steps): n_layer 12->11.
+
+## Invent-slot #9 candidates (post-exp-43, 2026-07-10 end-of-day)
+1. [gradient-clipping] Per-layer gradient-norm clipping: current training uses no grad clip or global clip; per-layer norms can stabilize early high-LR phases and transfer to real horizons. TRANSFERABLE.
+2. [tied-kv] Share K and V projections (K=V projection): halves KV param count, forces the model to represent query-relevant structure in a single projection. Architecture choice that would transfer. TRANSFERABLE.
+3. [local-window-attn] First N layers use local-window attention (window=256), last 11-N use full MHA: local layers are cheaper, global layers get more steps budget, AND the stack forms a natural easy→hard curriculum in attention. Same flash-safe path if window = power of 2 and is_causal stays True. TRANSFERABLE.
+Pick: tied-kv — pure config change if kv_proj already exists in the codebase (n_kv_head → 1 with repeat_interleave would functionally share), zero new code, architecture significance, transfers.
+
+## chain 54 postmortem (gradient clipping) — 2026-07-11
+- grad_clip=1.0: 3.4036 / 3.4084 — run1 beats best by 0.0011, run2 misses by 0.0037. High variance, statistical tie. DISCARD.
+- Signal: grad_clip direction may be real (run1 is the strongest single result in a long time) but 1.0 is too coarse — Muon outputs have different gradient scale than AdamW.
+- Candidates for chain continuation:
+  1. [grad_clip=0.5] Tighter clip — if Muon grads are typically < 1.0 norm, clipping at 0.5 may be more useful (hits more often, controls more updates)
+  2. [grad_clip=0.3] Even tighter — typical LLM production default with Muon
+  3. [rope_theta] Sweep rope_theta (currently 1e6): try 1e4 (standard) or 5e5 — RoPE theta affects how fast positional frequencies decay; may be miscalibrated for seq_len=1024
+- Pick: grad_clip=0.5 — exploit chain, tighten clip value. One more run before deciding if clipping signal is real.
+
+## chain 55 postmortem (grad_clip sweep) — 2026-07-11
+- clip=1.0: 3.4036/3.4084; clip=0.5: 3.4060. All three hover 3.403-3.408.
+- Variance ~0.004 nats. Clip value is inert. Signal not strong enough to land both runs below best.
+- CLOSED: gradient clipping does not reliably beat the noise floor at this budget.
+- Next axes: rope_theta sweep (currently 1e6, perhaps miscalibrated for seq=1024), or combo: grad_clip + another mechanism on top.
+- OR: accept that 3.4047 is a near-plateau for this config and try fundamentally different structural change (e.g. deeper smaller: n_layer=13, n_embd=704; or shallower wider: n_layer=9, n_embd=832).
+
+## DIRECTIVE from Eren (2026-07-11): ARCH vs SCHED classification
+- Pure LR/schedule tweaks (warmup length, anneal shape) are NOT real findings — horizon-bound to 600s budget.
+- Every keep must be classified: ARCH (transferable mechanism/architecture) or SCHED (horizon-bound schedule tuning).
+- Retroactive: warmup100 + exact curriculum durations = SCHED; full-MHA, no_plte, n_layer11, curriculum-as-mechanism, len384 = ARCH.
+- No further experiment slots on pure schedule knobs. Invent/explore slots target MECHANISMS only.
+- Headline metric for reports = ARCH keeps progress.
+- Note: device_batch/throughput knobs (exp 58) are BUDGET-ARTIFACT class, not ARCH — finish current run, classify accordingly, deprioritize similar.
+
+## Notion BlaGPT paper audit (2026-07-11, per Eren directive)
+IMPLEMENTED already (skip):
+- [x] Hyper-Connections (2409.19606) — bla_gpt.py hyper_num_streams
+- [x] Value Residual Learning (2410.17897) — resformer.py
+- [x] PolyCom activations (2411.03884) — polycom_order in config
+- [x] Cautious Weight Decay (2510.12402) — use_cautious_weight_decay
+- [x] AdaMuon (2507.11005) — optimizers/adamuon.py
+- [x] Exclusive Self Attention (2603.09078) — xsa, CURRENT BEST attention
+NOT implemented (invent-slot candidates, minimal config-gated impl):
+- [ ] Attention Residuals (Kimi/MoonshotAI PDF) — HIGH PRIORITY: lightweight, attention-output residual
+- [ ] Polar Coordinate PE / PoPE (2509.10534) — pos_encoding registry candidate
+- [ ] NAG Norm-AGnostic Residual (Zyphra, X post) — residual rescaling scheme
+- [ ] Aurora optimizer (Tilde blog) — leverage-aware for rectangular matrices, optimizer registry
+- [ ] Tapered Language Models (2606.23670) — tapered capacity across depth
+- [ ] Better Attention Priors (2601.15380) — read first
+- [ ] Unified Attention/Residual Sinks (2601.22966) — outlier-driven rescaling
+- [ ] Lipschitz-enforced training (2507.13338) — constraint method
+Out of scope for 600s harness: CARD diffusion LM, ConceptMoE, CALM continuous AR, byte-level U-Net LMs (tokenizer swap), superpowers (not a paper)
+Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.log); forgetting_attn mask=None bug fix-and-retest
+
+## chain 62 postmortem (Kimi Attention Residuals) — 2026-07-11
+- KEEP, NEW BEST 3.3915 (3.3915/3.3920 confirmed). First Notion-queue paper pays off.
+- Impl lesson: naive torch.stack over layer outputs cost -477 steps +10GB; loop-based accumulation (stack scores only) recovered it. Autograd-retained big stacks are the killer at this budget.
+- Mechanism: per-layer learnable query w_l, softmax over RMSNorm-ed layer deltas (keys=values), aggregate as layer input. v0=embedding.
+- Notion audit: mark Attention Residuals [x] IMPLEMENTED+KEPT.
+- Remaining steps deficit vs non-AttnRes (2555 vs 2841): Block AttnRes (paper) could recover more — future exploit candidate.
+
+
+## chain 71 postmortem (depth/width rebalance) — 2026-07-11
+- KEEP, CONFIRMED NEW BEST 3.3750 (3.3775/3.3750), versus prior best 3.3836.
+- Mechanism: reduce from 11 to 10 transformer layers while retaining MLP expand=10; saves 14M params and buys ~145 extra steps under the fixed wall-clock budget.
+- Classification: ARCH — depth/width allocation is transferable, not a schedule knob.
+- Next: return to invention queue; no more pure shape sweeps until a new mechanism is tested.
