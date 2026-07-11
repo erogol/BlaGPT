@@ -73,3 +73,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 53	956e334	52df558	3.528596	0.124400	44071	2676	1403.0	discard	dytnorm	tanh saturation destroys quality: +0.124. RMSNorm is optimal, closed
 54	HEAD	52df558	3.403597	-0.001099	42455	2744	1438.6	rerun?	grad_clip_1.0	beats best by 0.0011, borderline. 2744 steps (+79 vs base). confirming 54b
 54b	HEAD	52df558	3.408431	0.003635	42455	2736	1434.5	discard	grad_clip_1.0_confirm	run2 misses best by 0.0037: 3.4036/3.4084 high variance, statistical tie, discard
+55	HEAD	52df558	3.406004	0.001908	42455	2737	1435.0	discard	grad_clip_0.5	chain: 3.4036/3.4084/3.4060 — variance ~0.004, clip value inert, signal not strong enough. closed
