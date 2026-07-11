@@ -62,3 +62,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 44	956e334	52df558	3.453672	0.049176	41329	2828	1482.7	discard	mqa_n_kv1	MQA severely hurts quality (3.4537 +0.049). KV bottleneck too extreme. closed
 45	956e334	52df558	3.404227	-0.000469	42455	2823	1480.1	rerun?	nobias	bias=False: beats best by 0.0005 (borderline), +2.5pct steps. confirming
 45b	956e334	52df558	3.406556	0.001862	42454	2828	1482.7	discard	nobias_confirm	run2 misses best (3.4066 vs 3.4047). statistical tie, not a win. closed
+46	956e334	52df558	ERROR	-	-	-	-	discard	kda_interleaved	KDA requires fla (Flash Linear Attention) not installed. skipped
