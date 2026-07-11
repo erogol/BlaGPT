@@ -78,3 +78,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 57	HEAD	52df558	3.407937	-	42455	2739	1436.0	debug	snapshot_avg_k8_buggy	BUG: swap was in last_step path, harness stops via time-budget path — mechanism never ran. fixed, rerunning
 57	HEAD	52df558	3.408378	0.003682	42455	2741	1437.1	discard	snapshot_avg_k8_fixed	swap verified in time-budget path: 3.4084 (+0.0037). uniform avg mixes stale warmdown weights, same failure mode as EMA. weight-averaging family closed
 58	HEAD	52df558	3.408533	-	42455	2739	1436.0	debug	device_batch64_noop	BUG: GPTConfig lacks device_batch_size field, Coqpit dropped key silently (Accumulation steps: 2 in log). field added, rerunning
+58	HEAD	52df558	OOM	-	-	-	-	discard	device_batch64	OOM at seq1024 phase even with expandable_segments (needs +12GB). db=64 does not fit, only 32 valid. BUDGET-ARTIFACT line closed
