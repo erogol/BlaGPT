@@ -1,3 +1,15 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index 52aec55..d079337 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -113,6 +113,7 @@ class GPTConfig(Coqpit):
+     seq_curriculum_steps: int = 0
+     seq_curriculum_len: int = 512
+     warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
++    device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
+ 
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
 diff --git a/bla_gpt/train_ar.py b/bla_gpt/train_ar.py
 index e4bbec2..1e806cc 100644
 --- a/bla_gpt/train_ar.py
