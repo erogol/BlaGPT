@@ -115,6 +115,7 @@ class GPTConfig(Coqpit):
     warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
     device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
     mlp_expand: int = 4  # MLP hidden expansion factor (Primer_MLP)
+    use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -729,6 +730,7 @@ class GPT(nn.Module):
 
         # init all weights
         self.apply(self._init_weights)
+        self._init_attn_res()
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith("c_proj.weight"):
@@ -809,6 +811,10 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+    def _init_attn_res(self):
+        if getattr(self.config, "use_attn_res", False):
+            self.attn_res_w = nn.Parameter(torch.zeros(self.config.n_layer + 1, self.config.n_embd))
+
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
@@ -837,7 +843,16 @@ class GPT(nn.Module):
         if self.config.use_hyper_connections:
             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
 
+        _attn_res = getattr(self.config, "use_attn_res", False) and not self.config.use_hyper_connections
+        if _attn_res:
+            _ar_vs = [x]  # v0 = embedding output
         for layer_idx, block in enumerate(self.transformer.h):
+            if _attn_res:
+                _V = torch.stack(_ar_vs, dim=0)  # (L, b, t, d)
+                _K = F.rms_norm(_V, (_V.size(-1),))
+                _scores = (_K * self.attn_res_w[layer_idx]).sum(-1)  # (L, b, t)
+                _alpha = _scores.softmax(dim=0)
+                x = (_alpha.unsqueeze(-1) * _V).sum(0)
             # Apply engram based on variant
             if self.engram is not None:
                 if self.config.use_hyper_connections:
@@ -851,7 +866,19 @@ class GPT(nn.Module):
                     x = self.engram.mix_at_layer(x, x0, x0_ngram, layer_idx)
                 else:  # "simple" or "minimal"
                     x = x + self.engram(x, idx)
-            x = block(x, token_ids=idx)
+            if _attn_res:
+                _h_in = x
+                x = block(x, token_ids=idx)
+                _ar_vs.append(x - _h_in)
+            else:
+                x = block(x, token_ids=idx)
+
+        if _attn_res:
+            _V = torch.stack(_ar_vs, dim=0)
+            _K = F.rms_norm(_V, (_V.size(-1),))
+            _scores = (_K * self.attn_res_w[self.config.n_layer]).sum(-1)
+            _alpha = _scores.softmax(dim=0)
+            x = (_alpha.unsqueeze(-1) * _V).sum(0)
 
         if self.config.use_hyper_connections:
             x = x.sum(dim=2)
