@@ -95,3 +95,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 69	08389e3	08389e3	3.387920	-0.003138	48574	2322	1217.4	rerun?	mlp_expand10	curve STILL descending: 4/6/8/10 = 3.4103/3.3962/3.3909/3.3879. +26M params -120 steps. confirming
 69b	08389e3	08389e3	3.383645	-0.005555	48574	2335	1224.2	keep	mlp_expand10_confirm	CONFIRMED: both beat 3.3909 (3.3879/3.3836). NEW BEST 3.3836. expand curve 4/6/8/10 all descending [class=ARCH]
 70	08389e3	08389e3	3.387902	0.004257	50999	2216	1161.8	discard	mlp_expand12	curve turned: 4/6/8/10/12 = 3.4103/3.3962/3.3909/3.3836/3.3879. optimum expand=10. chain closed 5pts 2 keeps
+71	08389e3	08389e3	3.377524	-0.006121	46411	2473	1296.6	rerun?	n_layer10_wide_mlp	depth rebalance on wide MLP: 10 layers +138 steps -14M params, beats by 0.0061 (borderline). confirming
