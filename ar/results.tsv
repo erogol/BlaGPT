@@ -94,3 +94,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 68	08389e3	08389e3	3.447536	0.056636	47187	2190	1148.2	discard	pope	PoPE decoupled what/where: doubled qk dim costs -252 steps, quality far off at 600s horizon. impl stays config-gated
 69	08389e3	08389e3	3.387920	-0.003138	48574	2322	1217.4	rerun?	mlp_expand10	curve STILL descending: 4/6/8/10 = 3.4103/3.3962/3.3909/3.3879. +26M params -120 steps. confirming
 69b	08389e3	08389e3	3.383645	-0.005555	48574	2335	1224.2	keep	mlp_expand10_confirm	CONFIRMED: both beat 3.3909 (3.3879/3.3836). NEW BEST 3.3836. expand curve 4/6/8/10 all descending [class=ARCH]
+70	08389e3	08389e3	3.387902	0.004257	50999	2216	1161.8	discard	mlp_expand12	curve turned: 4/6/8/10/12 = 3.4103/3.3962/3.3909/3.3836/3.3879. optimum expand=10. chain closed 5pts 2 keeps
