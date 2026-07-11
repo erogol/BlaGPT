@@ -114,6 +114,7 @@ class GPTConfig(Coqpit):
     seq_curriculum_len: int = 512
     warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
     device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
+    mlp_expand: int = 4  # MLP hidden expansion factor (Primer_MLP)
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)

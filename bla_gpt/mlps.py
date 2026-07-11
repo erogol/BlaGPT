@@ -51,7 +51,7 @@ class Primer_MLP(nn.Module):
     # from 🎩 https://gist.github.com/tysam-code/b3519fd58ce5c94d1016c8903e50736d
     def __init__(self, config):
         super().__init__()
-        expand = 4
+        expand = getattr(config, "mlp_expand", 4)
         expand_dim = expand * config.n_embd
         self.c_fc_scale = nn.Parameter(torch.ones(config.n_embd))
         self.c_fc = nn.Parameter(semi_orthogonal_init(config.n_embd, expand_dim))
