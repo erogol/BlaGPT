@@ -1,0 +1,147 @@
+diff --git a/bla_gpt/attentions.py b/bla_gpt/attentions.py
+index e298e55..5a0b71f 100644
+--- a/bla_gpt/attentions.py
++++ b/bla_gpt/attentions.py
+@@ -437,6 +437,44 @@ class KVShiftingAttention(Attention):
+         return k, v
+ 
+ 
++class PoPEAttention(Attention):
++    """
++    Polar Coordinate Position Embedding (PoPE), Gopalakrishnan et al., ICML 2026
++    (arXiv:2509.10534). Decouples content ("what") from position ("where"):
++    q/k magnitudes come from softplus (non-negative content), phases carry
++    position. Score = sum_c mu_q mu_k cos((s-t)*theta_c + delta_c), computed
++    as a plain dot product of doubled vectors [mu*cos, mu*sin] -> flash-SDPA
++    compatible with 2x qk head_dim (v unchanged).
++    """
++
++    def __init__(self, config):
++        super().__init__(config)
++        d = self.head_dim
++        # frequencies over ALL d components: theta_c = theta^(-(c-1)/d)
++        freqs = config.rope_theta ** (-torch.arange(0, d, dtype=torch.float32) / d)
++        self.register_buffer("pope_freqs", freqs, persistent=False)
++        # learnable per-component phase shift on keys (per kv-head)
++        self.pope_delta = nn.Parameter(torch.zeros(self.n_kv_head, d))
++
++    def _apply_rotary(self, q, k, T_q, T):
++        # q: (B, T_q, n_head, d), k: (B, T, n_kv_head, d)
++        dev, dt = q.device, q.dtype
++        pos_q = torch.arange(T_q, device=dev, dtype=torch.float32)
++        pos_k = torch.arange(T, device=dev, dtype=torch.float32) if T_q != T else pos_q
++        ang_q = pos_q[:, None] * self.pope_freqs[None, :]        # (T_q, d)
++        ang_k = pos_k[:, None] * self.pope_freqs[None, :]        # (T, d)
++        ang_k = ang_k[None, :, :, None].permute(0, 1, 3, 2) if False else ang_k
++        mu_q = F.softplus(q.float())
++        mu_k = F.softplus(k.float())
++        cq, sq = torch.cos(ang_q)[None, :, None, :], torch.sin(ang_q)[None, :, None, :]
++        # keys get learnable phase shift delta (broadcast over batch, time)
++        ang_k_shifted = ang_k[None, :, None, :] + self.pope_delta[None, None, :, :]
++        ck, sk = torch.cos(ang_k_shifted), torch.sin(ang_k_shifted)
++        q2 = torch.cat([mu_q * cq, mu_q * sq], dim=-1).to(dt)
++        k2 = torch.cat([mu_k * ck, mu_k * sk], dim=-1).to(dt)
++        return q2, k2
++
++
+ class ForgettingAttention(Attention):
+     """
+     Forgetting Transformer Attention: https://openreview.net/pdf?id=q2Lnyegkr8
+@@ -446,6 +484,16 @@ class ForgettingAttention(Attention):
+         super().__init__(config)
+         # Add parameters for the forget gate (one for each attention head)
+         self.wf = nn.Linear(config.n_embd, self.n_head, bias=True)
++        # Causal mask buffer (fix: was referenced in forward but never defined)
++        if hasattr(self, "mask"):
++            del self.mask
++        self.register_buffer(
++            "mask",
++            torch.tril(torch.ones(config.block_size, config.block_size)).view(
++                1, 1, config.block_size, config.block_size
++            ),
++            persistent=False,
++        )
+ 
+     def forward(self, x, q=None, mask=None):
+         B, T, C = x.size()
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index 524e673..ea645dd 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -116,6 +116,7 @@ class GPTConfig(Coqpit):
+     device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
+     mlp_expand: int = 4  # MLP hidden expansion factor (Primer_MLP)
+     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
++    attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
+ 
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+@@ -317,6 +318,9 @@ def get_attention(config, depth=None):
+         return MultiTokenAttention(config)
+     elif attn_type == "kda":
+         return KDAAttention(config)
++    elif attn_type == "pope":
++        from attentions import PoPEAttention
++        return PoPEAttention(config)
+     elif attn_type == "gated":
+         return GatedAttention(config)
+     elif attn_type == "DiffAttnv2":
+@@ -844,15 +848,23 @@ class GPT(nn.Module):
+             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
+ 
+         _attn_res = getattr(self.config, "use_attn_res", False) and not self.config.use_hyper_connections
++        _ar_bs = getattr(self.config, "attn_res_block_size", 0)
+         if _attn_res:
+-            _ar_vs = [x]  # v0 = embedding output
++            if _ar_bs > 0:
++                _ar_blocks = []       # completed block sums
++                _ar_partial = x       # current block partial (starts with embedding)
++                _ar_vs = None
++            else:
++                _ar_vs = [x]  # v0 = embedding output
+         for layer_idx, block in enumerate(self.transformer.h):
+             if _attn_res:
+-                _V = torch.stack(_ar_vs, dim=0)  # (L, b, t, d)
+-                _K = F.rms_norm(_V, (_V.size(-1),))
+-                _scores = (_K * self.attn_res_w[layer_idx]).sum(-1)  # (L, b, t)
++                _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
++                _w = self.attn_res_w[layer_idx]
++                _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)  # (L, b, t)
+                 _alpha = _scores.softmax(dim=0)
+-                x = (_alpha.unsqueeze(-1) * _V).sum(0)
++                x = _srcs[0] * _alpha[0].unsqueeze(-1)
++                for _i in range(1, len(_srcs)):
++                    x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
+             # Apply engram based on variant
+             if self.engram is not None:
+                 if self.config.use_hyper_connections:
+@@ -869,16 +881,24 @@ class GPT(nn.Module):
+             if _attn_res:
+                 _h_in = x
+                 x = block(x, token_ids=idx)
+-                _ar_vs.append(x - _h_in)
++                if _ar_bs > 0:
++                    _ar_partial = _ar_partial + (x - _h_in)
++                    if (layer_idx + 1) % _ar_bs == 0:
++                        _ar_blocks.append(_ar_partial)
++                        _ar_partial = torch.zeros_like(_ar_partial)
++                else:
++                    _ar_vs.append(x - _h_in)
+             else:
+                 x = block(x, token_ids=idx)
+ 
+         if _attn_res:
+-            _V = torch.stack(_ar_vs, dim=0)
+-            _K = F.rms_norm(_V, (_V.size(-1),))
+-            _scores = (_K * self.attn_res_w[self.config.n_layer]).sum(-1)
++            _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
++            _w = self.attn_res_w[self.config.n_layer]
++            _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)
+             _alpha = _scores.softmax(dim=0)
+-            x = (_alpha.unsqueeze(-1) * _V).sum(0)
++            x = _srcs[0] * _alpha[0].unsqueeze(-1)
++            for _i in range(1, len(_srcs)):
++                x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
+ 
+         if self.config.use_hyper_connections:
+             x = x.sum(dim=2)
