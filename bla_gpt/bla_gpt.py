@@ -318,6 +318,9 @@ def get_attention(config, depth=None):
         return MultiTokenAttention(config)
     elif attn_type == "kda":
         return KDAAttention(config)
+    elif attn_type == "pope":
+        from attentions import PoPEAttention
+        return PoPEAttention(config)
     elif attn_type == "gated":
         return GatedAttention(config)
     elif attn_type == "DiffAttnv2":
