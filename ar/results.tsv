@@ -65,3 +65,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 46	956e334	52df558	ERROR	-	-	-	-	discard	kda_interleaved	KDA requires fla (Flash Linear Attention) not installed. skipped
 47	956e334	52df558	3.424044	0.019348	45383	2641	1384.6	discard	gated_attention	gate_proj adds params: -113 steps, net negative. attention sink claim not enough to overcome cost
 48	956e334	52df558	ERROR	-	-	-	-	discard	diff_attn_v1	DiffAttn requires flash_attn not installed. skipped
+49	956e334	52df558	3.442099	0.037503	47192	2444	1281.4	discard	diff_attn_v2	doubled query heads too costly: -275 steps, +7MB VRAM. architecture overhead kills budget
