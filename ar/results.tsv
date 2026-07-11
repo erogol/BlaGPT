@@ -88,3 +88,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 63	HEAD	57bdb9b	3.983206	0.591706	58865	1314	688.9	discard	kda_retest	fla kernels 2x slower than flash-SDPA: 1314 steps, +15GB. linear attention cannot compete at 600s. closed
 64	HEAD	57bdb9b	3.465764	0.074264	48156	2359	1236.8	discard	diffattn_v1_retest	flash-kernel DiffAttn still loses: -196 steps +4.2GB, quality worse. differential attention family fully closed
 65	HEAD	57bdb9b	3.516862	0.125362	66614	1867	978.8	discard	forgetting_attn_fixed	mask bug fixed but manual TxT attention off flash path: 1867 steps, 66GB. mechanism closed, fix stays
+66	HEAD	57bdb9b	3.399989	0.008489	43608	2704	1417.7	discard	block_attn_res_bs4	steps +149 but quality -0.0085 vs full AttnRes: block sums lose layer granularity. full AttnRes stays
