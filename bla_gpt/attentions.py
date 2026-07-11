@@ -446,6 +446,16 @@ class ForgettingAttention(Attention):
         super().__init__(config)
         # Add parameters for the forget gate (one for each attention head)
         self.wf = nn.Linear(config.n_embd, self.n_head, bias=True)
+        # Causal mask buffer (fix: was referenced in forward but never defined)
+        if hasattr(self, "mask"):
+            del self.mask
+        self.register_buffer(
+            "mask",
+            torch.tril(torch.ones(config.block_size, config.block_size)).view(
+                1, 1, config.block_size, config.block_size
+            ),
+            persistent=False,
+        )
 
     def forward(self, x, q=None, mask=None):
         B, T, C = x.size()
