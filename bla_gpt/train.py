@@ -192,16 +192,17 @@ if __name__ == "__main__":
     args = Hyperparameters()
     model_config, model = get_model(cli_args.model_name)
 
-    # Override Hyperparameters with matching model_config attributes
+    if cli_args.config:
+        model_config.load_json(cli_args.config)
+
+    # Apply model-config values to matching training hyperparameters after
+    # loading overrides (e.g. warmup_iters in a full-training recipe).
     for key, value in model_config.to_dict().items():
         if hasattr(args, key):
             setattr(args, key, value)
 
     if cli_args.run_name:
         args.run_name = cli_args.run_name
-
-    if cli_args.config:
-        model_config.load_json(cli_args.config)
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
@@ -453,10 +454,21 @@ if __name__ == "__main__":
 
         # --------------- TRAINING SECTION BEGIN -----------------
         model.train()
+        # Optional sequence-length curriculum from the model recipe. Data and
+        # validation remain unchanged; only early train forwards use a prefix.
+        curriculum_steps = getattr(model_config, "seq_curriculum_steps", 0)
+        curriculum_len = getattr(model_config, "seq_curriculum_len", T)
+        use_short_sequence = curriculum_steps > 0 and step < curriculum_steps
         for i in range(1, train_accumulation_steps + 1):
             # forward pass
             with ctx:
-                _, loss = model(x, y)
+                if use_short_sequence:
+                    _, loss = model(
+                        x[:, :curriculum_len].contiguous(),
+                        y[:, :curriculum_len].contiguous(),
+                    )
+                else:
+                    _, loss = model(x, y)
                 metrics = None
                 if type(loss) is dict:
                     metrics = {k: v for k, v in loss.items() if k != "total"}
