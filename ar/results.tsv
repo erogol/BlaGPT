@@ -84,3 +84,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 61	HEAD	52df558	3.396179	-0.008521	42449	2841	1489.5	keep	primer_expand6	CLEAN KEEP (3.3962 < best-eps 3.3983). NEW BEST. ReLU2 MLP at expand=6: param parity w/ swiglu, 2 matmuls not 3, +97 steps. activation chain 3/4 [class=ARCH]
 62	57bdb9b	57bdb9b	3.409586	0.013407	52694	2364	1239.4	chain	attn_res_kimi	chain 1: quality-per-step BETTER than base but torch.stack impl costs -477 steps +10GB. reimplementing aggregation efficiently
 62b	HEAD	57bdb9b	3.391528	-0.004651	43917	2536	1329.6	rerun?	attn_res_efficient	chain 2: loop impl recovers +172 steps, beats best by 0.0047 (borderline). confirming 62c
+62c	HEAD	57bdb9b	3.391956	-0.004223	43917	2555	1339.6	keep	attn_res_confirm	CONFIRMED: both runs beat 3.3962 (3.3915/3.3920). NEW BEST 3.3915. Kimi AttnRes: softmax over layer deltas, +9K params [class=ARCH]
