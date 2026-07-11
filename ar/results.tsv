@@ -76,3 +76,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 55	HEAD	52df558	3.406004	0.001908	42455	2737	1435.0	discard	grad_clip_0.5	chain: 3.4036/3.4084/3.4060 — variance ~0.004, clip value inert, signal not strong enough. closed
 56	956e334	52df558	3.420833	0.016137	42455	2750	1441.8	discard	rope_simplified	concat-RoPE worse than 2D rotation: +0.016. standard rope=optimal, closed
 57	HEAD	52df558	3.407937	-	42455	2739	1436.0	debug	snapshot_avg_k8_buggy	BUG: swap was in last_step path, harness stops via time-budget path — mechanism never ran. fixed, rerunning
+57	HEAD	52df558	3.408378	0.003682	42455	2741	1437.1	discard	snapshot_avg_k8_fixed	swap verified in time-budget path: 3.4084 (+0.0037). uniform avg mixes stale warmdown weights, same failure mode as EMA. weight-averaging family closed
