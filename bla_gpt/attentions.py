@@ -437,6 +437,44 @@ class KVShiftingAttention(Attention):
         return k, v
 
 
+class PoPEAttention(Attention):
+    """
+    Polar Coordinate Position Embedding (PoPE), Gopalakrishnan et al., ICML 2026
+    (arXiv:2509.10534). Decouples content ("what") from position ("where"):
+    q/k magnitudes come from softplus (non-negative content), phases carry
+    position. Score = sum_c mu_q mu_k cos((s-t)*theta_c + delta_c), computed
+    as a plain dot product of doubled vectors [mu*cos, mu*sin] -> flash-SDPA
+    compatible with 2x qk head_dim (v unchanged).
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        d = self.head_dim
+        # frequencies over ALL d components: theta_c = theta^(-(c-1)/d)
+        freqs = config.rope_theta ** (-torch.arange(0, d, dtype=torch.float32) / d)
+        self.register_buffer("pope_freqs", freqs, persistent=False)
+        # learnable per-component phase shift on keys (per kv-head)
+        self.pope_delta = nn.Parameter(torch.zeros(self.n_kv_head, d))
+
+    def _apply_rotary(self, q, k, T_q, T):
+        # q: (B, T_q, n_head, d), k: (B, T, n_kv_head, d)
+        dev, dt = q.device, q.dtype
+        pos_q = torch.arange(T_q, device=dev, dtype=torch.float32)
+        pos_k = torch.arange(T, device=dev, dtype=torch.float32) if T_q != T else pos_q
+        ang_q = pos_q[:, None] * self.pope_freqs[None, :]        # (T_q, d)
+        ang_k = pos_k[:, None] * self.pope_freqs[None, :]        # (T, d)
+        ang_k = ang_k[None, :, :, None].permute(0, 1, 3, 2) if False else ang_k
+        mu_q = F.softplus(q.float())
+        mu_k = F.softplus(k.float())
+        cq, sq = torch.cos(ang_q)[None, :, None, :], torch.sin(ang_q)[None, :, None, :]
+        # keys get learnable phase shift delta (broadcast over batch, time)
+        ang_k_shifted = ang_k[None, :, None, :] + self.pope_delta[None, None, :, :]
+        ck, sk = torch.cos(ang_k_shifted), torch.sin(ang_k_shifted)
+        q2 = torch.cat([mu_q * cq, mu_q * sq], dim=-1).to(dt)
+        k2 = torch.cat([mu_k * ck, mu_k * sk], dim=-1).to(dt)
+        return q2, k2
+
+
 class ForgettingAttention(Attention):
     """
     Forgetting Transformer Attention: https://openreview.net/pdf?id=q2Lnyegkr8
