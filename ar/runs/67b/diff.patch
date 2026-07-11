@@ -1,0 +1,92 @@
+diff --git a/bla_gpt/attentions.py b/bla_gpt/attentions.py
+index e298e55..ce32485 100644
+--- a/bla_gpt/attentions.py
++++ b/bla_gpt/attentions.py
+@@ -446,6 +446,16 @@ class ForgettingAttention(Attention):
+         super().__init__(config)
+         # Add parameters for the forget gate (one for each attention head)
+         self.wf = nn.Linear(config.n_embd, self.n_head, bias=True)
++        # Causal mask buffer (fix: was referenced in forward but never defined)
++        if hasattr(self, "mask"):
++            del self.mask
++        self.register_buffer(
++            "mask",
++            torch.tril(torch.ones(config.block_size, config.block_size)).view(
++                1, 1, config.block_size, config.block_size
++            ),
++            persistent=False,
++        )
+ 
+     def forward(self, x, q=None, mask=None):
+         B, T, C = x.size()
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index 524e673..43aec5c 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -116,6 +116,7 @@ class GPTConfig(Coqpit):
+     device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
+     mlp_expand: int = 4  # MLP hidden expansion factor (Primer_MLP)
+     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
++    attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
+ 
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+@@ -844,15 +845,23 @@ class GPT(nn.Module):
+             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
+ 
+         _attn_res = getattr(self.config, "use_attn_res", False) and not self.config.use_hyper_connections
++        _ar_bs = getattr(self.config, "attn_res_block_size", 0)
+         if _attn_res:
+-            _ar_vs = [x]  # v0 = embedding output
++            if _ar_bs > 0:
++                _ar_blocks = []       # completed block sums
++                _ar_partial = x       # current block partial (starts with embedding)
++                _ar_vs = None
++            else:
++                _ar_vs = [x]  # v0 = embedding output
+         for layer_idx, block in enumerate(self.transformer.h):
+             if _attn_res:
+-                _V = torch.stack(_ar_vs, dim=0)  # (L, b, t, d)
+-                _K = F.rms_norm(_V, (_V.size(-1),))
+-                _scores = (_K * self.attn_res_w[layer_idx]).sum(-1)  # (L, b, t)
++                _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
++                _w = self.attn_res_w[layer_idx]
++                _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)  # (L, b, t)
+                 _alpha = _scores.softmax(dim=0)
+-                x = (_alpha.unsqueeze(-1) * _V).sum(0)
++                x = _srcs[0] * _alpha[0].unsqueeze(-1)
++                for _i in range(1, len(_srcs)):
++                    x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
+             # Apply engram based on variant
+             if self.engram is not None:
+                 if self.config.use_hyper_connections:
+@@ -869,16 +878,24 @@ class GPT(nn.Module):
+             if _attn_res:
+                 _h_in = x
+                 x = block(x, token_ids=idx)
+-                _ar_vs.append(x - _h_in)
++                if _ar_bs > 0:
++                    _ar_partial = _ar_partial + (x - _h_in)
++                    if (layer_idx + 1) % _ar_bs == 0:
++                        _ar_blocks.append(_ar_partial)
++                        _ar_partial = torch.zeros_like(_ar_partial)
++                else:
++                    _ar_vs.append(x - _h_in)
+             else:
+                 x = block(x, token_ids=idx)
+ 
+         if _attn_res:
+-            _V = torch.stack(_ar_vs, dim=0)
+-            _K = F.rms_norm(_V, (_V.size(-1),))
+-            _scores = (_K * self.attn_res_w[self.config.n_layer]).sum(-1)
++            _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
++            _w = self.attn_res_w[self.config.n_layer]
++            _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)
+             _alpha = _scores.softmax(dim=0)
+-            x = (_alpha.unsqueeze(-1) * _V).sum(0)
++            x = _srcs[0] * _alpha[0].unsqueeze(-1)
++            for _i in range(1, len(_srcs)):
++                x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
+ 
+         if self.config.use_hyper_connections:
+             x = x.sum(dim=2)
