@@ -67,3 +67,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 48	956e334	52df558	ERROR	-	-	-	-	discard	diff_attn_v1	DiffAttn requires flash_attn not installed. skipped
 49	956e334	52df558	3.442099	0.037503	47192	2444	1281.4	discard	diff_attn_v2	doubled query heads too costly: -275 steps, +7MB VRAM. architecture overhead kills budget
 50	956e334	52df558	ERROR	-	-	-	-	discard	forgetting_attn	self.mask=None bug in _forgetting_attention: mask not initialized before first call. code bug, not config. skipped
+51	956e334	52df558	3.422681	0.018085	45414	2665	1397.2	discard	kvshifting_attn	KV shift: +VRAM, -94 steps, no quality gain. attention sweep exhausted
