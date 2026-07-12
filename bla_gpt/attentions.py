@@ -420,6 +420,71 @@ class GOATSinkAttention(ExclusiveSelfAttention):
         y = att @ v
         return self._apply_exclusion(y, v)
 
+class GOATRelPriorAttention(GOATSinkAttention):
+    """XSA + GOAT sink prior + relative spectral prior (arXiv:2601.15380 Sec. 6).
+
+    Adds a translation-equivariant per-head log-prior
+    K_rel(i, j) = sum_r [alpha_r * cos(w_r (i - j)) + beta_r * sin(w_r (i - j))]
+    to the attention logits on top of the key-0 sink prior. Frequencies are a
+    fixed geometric ladder with base config.rope_theta; alpha/beta are
+    zero-initialized so training starts byte-identical to GOATSinkAttention.
+    Realized via the additive attn_mask, which is mathematically identical to
+    the paper's composite-vector FlashAttention embedding (Eqs. 20-24).
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        R = int(getattr(config, "goat_rel_num_freqs", 8))
+        freqs = torch.tensor(
+            [float(config.rope_theta) ** (-r / max(R - 1, 1)) for r in range(R)],
+            dtype=torch.float32,
+        )
+        self.register_buffer("goat_rel_freqs", freqs, persistent=False)
+        self.rel_alpha = nn.Parameter(torch.zeros(self.n_head, R))
+        self.rel_beta = nn.Parameter(torch.zeros(self.n_head, R))
+
+    def _rel_log_prior(self, T_q, T, device):
+        pos = torch.arange(T, device=device, dtype=torch.float32)
+        delta = pos[T - T_q :, None] - pos[None, :]
+        ang = delta[..., None] * self.goat_rel_freqs.to(device)
+        return torch.einsum("hr,tsr->hts", self.rel_alpha, torch.cos(ang)) + torch.einsum(
+            "hr,tsr->hts", self.rel_beta, torch.sin(ang)
+        )
+
+    def _flash_attention(self, q, k, v):
+        T_q, T = q.size(2), k.size(2)
+        mask = self._rel_log_prior(T_q, T, q.device)[None].repeat(1, 1, 1, 1)
+        mask[:, :, :, 0] = mask[:, :, :, 0] + self.sink_prior[None, :, None]
+        causal = torch.triu(torch.ones(T_q, T, dtype=torch.bool, device=q.device), diagonal=1)
+        mask = mask.masked_fill(causal[None, None], float("-inf")).to(q.dtype)
+        y = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=mask,
+            dropout_p=self.dropout if self.training else 0,
+            is_causal=False,
+        )
+        return self._apply_exclusion(y, v)
+
+    def _manual_attention(self, q, k, v, T_q, T):
+        if self.causal and self.mask is None:
+            self.mask = torch.tril(
+                torch.ones(T_q, T, dtype=torch.bool, device=q.device)
+            ).view(1, 1, T_q, T)
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        if self.soft_cap > 0:
+            att = soft_cap(att, self.soft_cap)
+        att = att + self._rel_log_prior(T_q, T, q.device)[None].to(att.dtype)
+        att[:, :, :, 0] = att[:, :, :, 0] + self.sink_prior[None, :, None]
+        att = att.masked_fill(self.mask[:, :, :T_q, :T] == 0, float("-inf"))
+        if self.use_softpick:
+            att = softpick(att, dim=-1)
+        else:
+            att = F.softmax(att, dim=-1)
+        att = self.attn_dropout(att)
+        y = att @ v
+        return self._apply_exclusion(y, v)
+
+
 class MultiHeadLatentAttention(Attention):
     def __init__(self, config):
         assert config.n_latentd > 0, "Must provide number of latent dimensions"
