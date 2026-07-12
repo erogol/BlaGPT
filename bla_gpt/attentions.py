@@ -157,6 +157,21 @@ class Attention(nn.Module):
                 torch.zeros(2 * config.block_size - 1, self.head_dim)
             )
             nn.init.normal_(self.rel_pos_emb, std=0.02)
+        elif config.pos_encoding == "pope":
+            # Polar Coordinate Positional Embedding (PoPE), Gopalakrishnan,
+            # Csordas, Schmidhuber & Mozer, arXiv:2509.10534 (Eqs. 3-8).
+            # Position lives in the phase of each q/k feature; the magnitude
+            # (content) is softplus(feature). Uses d frequencies (RoPE uses
+            # d/2) on the same geometric ladder theta_c = rope_theta^(-(c-1)/d),
+            # plus a per-head learnable key-phase bias delta_c clamped to
+            # [-2*pi, 0], zero-initialized for length generalization.
+            d = self.head_dim
+            freqs = config.rope_theta ** (
+                -torch.arange(0, d, dtype=torch.float32) / d
+            )
+            self.register_buffer("pope_freqs", freqs, persistent=False)
+            self.pope_delta = nn.Parameter(torch.zeros(self.n_kv_head, d))
+            self.use_pope = True
         elif config.pos_encoding == "none" or config.pos_encoding is None:
             pass
         else:
@@ -208,6 +223,8 @@ class Attention(nn.Module):
 
         if hasattr(self, "rotary"):
             q, k = self._apply_rotary(q, k, T_q, T)
+        elif getattr(self, "use_pope", False):
+            q, k = self._apply_pope(q, k, T_q, T)
         elif hasattr(self, "rel_pos_emb"):
             q, k = self._apply_relative_pos(q, k, T_q, T)
 
@@ -242,6 +259,31 @@ class Attention(nn.Module):
         cos, sin = self.rotary(k) if T_q != T else (cos, sin)
         k = self.apply_rope_fn(k, cos, sin)
         return q, k
+
+    def _apply_pope(self, q, k, T_q, T):
+        # PoPE (arXiv:2509.10534, Eqs. 3-8). Map each real q/k feature to a
+        # nonnegative magnitude via softplus and place position in the phase,
+        # then return the Cartesian [mu*cos, mu*sin] doubling so that the plain
+        # dot product q2 . k2 over the last (2d) dim equals
+        #   sum_c softplus(q_c) softplus(k_c) cos((s - t) theta_c + delta_c).
+        # delta_c is the per-head learnable key-phase bias, clamped to [-2*pi, 0].
+        # v and the output dimension are unchanged (only q/k are doubled).
+        dev, dt = q.device, q.dtype
+        pos_q = torch.arange(T_q, device=dev, dtype=torch.float32)
+        pos_k = torch.arange(T, device=dev, dtype=torch.float32) if T_q != T else pos_q
+        ang_q = pos_q[:, None] * self.pope_freqs[None, :]        # (T_q, d)
+        ang_k = pos_k[:, None] * self.pope_freqs[None, :]        # (T, d)
+        mu_q = F.softplus(q.float())                            # (B, T_q, n_head, d)
+        mu_k = F.softplus(k.float())                            # (B, T, n_kv_head, d)
+        delta = self.pope_delta.clamp(-2.0 * math.pi, 0.0)      # (n_kv_head, d)
+        cq = torch.cos(ang_q)[None, :, None, :]
+        sq = torch.sin(ang_q)[None, :, None, :]
+        ang_k_shifted = ang_k[None, :, None, :] + delta[None, None, :, :]
+        ck = torch.cos(ang_k_shifted)
+        sk = torch.sin(ang_k_shifted)
+        q2 = torch.cat([mu_q * cq, mu_q * sq], dim=-1).to(dt)
+        k2 = torch.cat([mu_k * ck, mu_k * sk], dim=-1).to(dt)
+        return q2, k2
 
     def _apply_relative_pos(self, q, k, T_q, T):
         # Get relative position embeddings
@@ -481,44 +523,6 @@ class KVShiftingAttention(Attention):
         v = self.beta1.view(1, 1, -1, 1) * v + self.beta2.view(1, 1, -1, 1) * v_shifted
 
         return k, v
-
-
-class PoPEAttention(Attention):
-    """
-    Polar Coordinate Position Embedding (PoPE), Gopalakrishnan et al., ICML 2026
-    (arXiv:2509.10534). Decouples content ("what") from position ("where"):
-    q/k magnitudes come from softplus (non-negative content), phases carry
-    position. Score = sum_c mu_q mu_k cos((s-t)*theta_c + delta_c), computed
-    as a plain dot product of doubled vectors [mu*cos, mu*sin] -> flash-SDPA
-    compatible with 2x qk head_dim (v unchanged).
-    """
-
-    def __init__(self, config):
-        super().__init__(config)
-        d = self.head_dim
-        # frequencies over ALL d components: theta_c = theta^(-(c-1)/d)
-        freqs = config.rope_theta ** (-torch.arange(0, d, dtype=torch.float32) / d)
-        self.register_buffer("pope_freqs", freqs, persistent=False)
-        # learnable per-component phase shift on keys (per kv-head)
-        self.pope_delta = nn.Parameter(torch.zeros(self.n_kv_head, d))
-
-    def _apply_rotary(self, q, k, T_q, T):
-        # q: (B, T_q, n_head, d), k: (B, T, n_kv_head, d)
-        dev, dt = q.device, q.dtype
-        pos_q = torch.arange(T_q, device=dev, dtype=torch.float32)
-        pos_k = torch.arange(T, device=dev, dtype=torch.float32) if T_q != T else pos_q
-        ang_q = pos_q[:, None] * self.pope_freqs[None, :]        # (T_q, d)
-        ang_k = pos_k[:, None] * self.pope_freqs[None, :]        # (T, d)
-        ang_k = ang_k[None, :, :, None].permute(0, 1, 3, 2) if False else ang_k
-        mu_q = F.softplus(q.float())
-        mu_k = F.softplus(k.float())
-        cq, sq = torch.cos(ang_q)[None, :, None, :], torch.sin(ang_q)[None, :, None, :]
-        # keys get learnable phase shift delta (broadcast over batch, time)
-        ang_k_shifted = ang_k[None, :, None, :] + self.pope_delta[None, None, :, :]
-        ck, sk = torch.cos(ang_k_shifted), torch.sin(ang_k_shifted)
-        q2 = torch.cat([mu_q * cq, mu_q * sq], dim=-1).to(dt)
-        k2 = torch.cat([mu_k * ck, mu_k * sk], dim=-1).to(dt)
-        return q2, k2
 
 
 class ForgettingAttention(Attention):
