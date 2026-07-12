@@ -1,0 +1,6 @@
+started_utc=2026-07-12T00:57:33Z
+git_commit=84fb3dc1a6aedaff4ad81b00c83c9913efe72ab7
+run_name=ar_full_F72
+config=/nvme/BlaGPT/ar/full_runs/F72/config.json
+exit_code=0
+checkpoint_dir=/nvme/BlaGPT/bla_gpt/logs/ar_full_F72_0

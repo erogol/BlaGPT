@@ -125,7 +125,7 @@ NOT implemented (invent-slot candidates, minimal config-gated impl):
 - [ ] Polar Coordinate PE / PoPE (2509.10534) — pos_encoding registry candidate
 - [ ] NAG Norm-AGnostic Residual (Zyphra, X post) — residual rescaling scheme
 - [ ] Aurora optimizer (Tilde blog) — leverage-aware for rectangular matrices, optimizer registry
-- [ ] Tapered Language Models (2606.23670) — tapered capacity across depth
+- [x] Tapered Language Models (2606.23670) — IMPLEMENTED (F72, config-gated `use_tapered_mlp`, default off); see F72 audit below
 - [ ] Better Attention Priors (2601.15380) — read first
 - [ ] Unified Attention/Residual Sinks (2601.22966) — outlier-driven rescaling
 - [ ] Lipschitz-enforced training (2507.13338) — constraint method
@@ -145,3 +145,13 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Mechanism: reduce from 11 to 10 transformer layers while retaining MLP expand=10; saves 14M params and buys ~145 extra steps under the fixed wall-clock budget.
 - Classification: ARCH — depth/width allocation is transferable, not a schedule knob.
 - Next: return to invention queue; no more pure shape sweeps until a new mechanism is tested.
+
+
+## F72 audit — Tapered Language Models (arXiv:2606.23670), paper read 2026-07-12
+- Paper: "Tapered Language Models", Reza Bayat, Ali Behrouz, Aaron Courville (2026). Read the arXiv abstract + HTML body (not just the title).
+- Mechanism (paper Eq. 5): d_ff(l) = d_end + (d_start - d_end)/2 * (1 + cos(pi*l/(L-1))). Default endpoints d_start/d_end = 1.5/0.5 x baseline width, which reduces to d_ff(l) = base*(1 + 0.5*cos(pi*l/(L-1))). Earlier layers wider, later layers narrower. Tapering applies to the MLP intermediate dim ONLY (model width d, head count, KV dim unchanged).
+- Budget constraint (paper Eq. 7): (1/L) * sum_l d_ff(l) = base -> total MLP params/FLOPs identical to the uniform baseline ("free lever, no extra params/compute"). Paper rounds each width to the nearest multiple of 16, pins the first/last layers to d_start/d_end, and nudges interior widths in 16-unit steps to satisfy the average exactly while staying monotonically decreasing.
+- Repo adaptation (smallest native diff): `tapered_mlp_dims()` in bla_gpt/mlps.py; gated by GPTConfig.use_tapered_mlp (default False). Alignment uses the REPO's own width granularity (multiple of 64, as used for vocab/n_embd) rather than the paper's 16; endpoints pinned to the aligned 1.5x/0.5x base, interior nudged in 64-unit steps so the aggregate == n_layer*base EXACTLY and widths stay monotone non-increasing. Only the Primer MLP path (the F72 baseline activation) is tapered; enabling taper with a non-primer activation raises. Default-off => byte-identical model construction when the gate is off.
+- F72 config = combined_keeps full baseline + use_tapered_mlp=true (single added key, no other change). base_d_ff = mlp_expand*n_embd = 10*768 = 7680, L=10 -> per-layer widths [11520, 11264, 10624, 9600, 8320, 7040, 5760, 4736, 4096, 3840], sum = 76800 = 10*7680 (budget preserved).
+- Class: ARCH (depth-aware capacity allocation is a transferable architecture change, not a schedule knob).
+- Full result: F72 completed all 5100 steps from random init via normal train.py; final val_loss 3.2372 vs baseline 3.2354 (+0.0018). Decision: DISCARD. No confirmation required because it did not improve. Checkpoint: bla_gpt/logs/ar_full_F72_0/state_step005100.pt.
