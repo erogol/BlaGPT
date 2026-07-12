@@ -14,9 +14,8 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 
-from attentions import (Attention, DilatedAttention, ExclusiveSelfAttention, ForgettingAttention,
-                        GatedAttention, GOATSinkAttention,
-    GOATRelPriorAttention, KDAAttention, KVShiftingAttention,
+from attentions import (Attention, ComposableGatedAttention, DilatedAttention, ExclusiveSelfAttention, ForgettingAttention,
+                        GatedAttention, GOATSinkAttention, KDAAttention, KVShiftingAttention,
                         MultiheadDiffAttn, MultiheadDiffAttnv2, MultiHeadLatentAttention,
                         MultiTokenAttention, PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
@@ -119,18 +118,13 @@ class GPTConfig(Coqpit):
     use_tapered_mlp: bool = False  # Tapered LMs (arXiv:2606.23670): cosine-taper per-layer Primer MLP width, budget-preserving
     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
     use_goat_sink_prior: bool = False  # GOAT key-only sink prior (arXiv:2601.15380, Litman & Guo, 2026)
-    use_goat_rel_prior: bool = False  # GOAT relative spectral prior (arXiv:2601.15380 Sec. 6)
-    goat_rel_num_freqs: int = 8  # number of frequencies R in the GOAT relative prior ladder
     use_pre_affine_norm: bool = False  # PreAffineRMSNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.3
     use_gated_norm: bool = False  # GatedNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.4
     gated_norm_rank: int = 16  # bottleneck rank r for GatedNorm low-rank gate
+    affine_attn_momentum: float = 0.95  # EMA momentum rho for affine-scaled attention alpha_ma
+    use_hybrid_norm: bool = False  # HybridNorm (arXiv:2503.04598): QKV-norm in attention + Post-Norm in FFN
+    use_composable_gated_attn: bool = False  # Composable Gated Attention (arXiv:2505.06708) on top of GOAT sink
     attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
-
-    # NAG (Norm-AGnostic residual): Figliolia & Millidge (Zyphra, 2026, arXiv:2606.16112)
-    use_nag_residual: bool = False  # Norm-agnostic residual update (eq.14): scale layer output by residual norm, orthogonalize + N_out-normalize, gate by norm modulator. Default off => byte-identical to additive residual.
-    nag_num_directions: int = 32  # C in eq.13: number of learned preferred directions in the norm modulator
-    nag_beta: float = 1.0  # beta_l in eq.13: sharpness exponent of the norm modulator (fixed; paper's per-layer role is MoD-specific, which we omit)
-    nag_init_p: float = 0.5  # p in eq.24: alpha_l = 1/l**p depth-scaled init (p=0.5 recovers eq.23, alpha_l = 1/sqrt(l))
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -315,8 +309,8 @@ def get_attention(config, depth=None):
     if attn_type == "regular":
         return Attention(config)
     elif attn_type == "xsa":
-        if getattr(config, "use_goat_rel_prior", False):
-            return GOATRelPriorAttention(config)
+        if getattr(config, "use_composable_gated_attn", False):
+            return ComposableGatedAttention(config)
         if getattr(config, "use_goat_sink_prior", False):
             return GOATSinkAttention(config)
         return ExclusiveSelfAttention(config)
@@ -336,6 +330,9 @@ def get_attention(config, depth=None):
         return MultiTokenAttention(config)
     elif attn_type == "kda":
         return KDAAttention(config)
+    elif attn_type == "pope":
+        from attentions import PoPEAttention
+        return PoPEAttention(config)
     elif attn_type == "gated":
         return GatedAttention(config)
     elif attn_type == "DiffAttnv2":
@@ -410,79 +407,6 @@ class MultiTokenPredictionHead(nn.Module):
 #
 
 
-class NAGResidual(nn.Module):
-    """Norm-AGnostic residual update (Figliolia & Millidge, Zyphra 2026, arXiv:2606.16112).
-
-    Replaces the additive residual ``R_{l+1} = R_l + f_l(R̄_l)`` (eq.6) with the
-    full norm-agnostic update (eq.14):
-
-        R̄_l   = N_in(R_l) = sqrt(d) * R_l / ||R_l||          (eq.3-4, scale-only)
-        ρ_l   = ||R_l|| / sqrt(d)                             (eq.5)
-        f     = branch_out - mean(branch_out)                (feature-wise centering, last op of f_l)
-        f⊥    = f - (<f, R̄_l> / d) R̄_l                       (eq.10, orthogonalize vs residual direction)
-        N_out(f⊥) = sqrt(d) * f⊥ / ||f⊥||                     (eq.12)
-        m_l   = ( Σ_i softmax(θ)_i · σ(R̄_l·w_i + b_i) )^β     (eq.13, norm modulator ∈ [0,1])
-        R_{l+1} = ρ_l R̄_l + ρ_l α_l m_l N_out(f⊥)            (eq.14)
-
-    Because ``ρ_l R̄_l == R_l == x`` exactly, this reduces to the drop-in form
-    ``x + ρ_l · α_l · m_l · N_out(f⊥)``. The added term is orthogonal to the
-    residual direction and has norm ``||x|| · α_l · m_l``, so the per-layer norm
-    gain is ``sqrt(1 + α_l² m_l²)`` (eq.15) — independent of the absolute residual
-    norm, which is the norm-agnostic property.
-
-    α_l is a trainable scalar initialised by depth-scaling ``α_l = 1/l**p`` (eq.24;
-    p=0.5 recovers eq.23). β is a fixed hyperparameter (the paper's per-layer β_l
-    matters mainly for Mixture-of-Depths, which is out of scope here). The log-space
-    norm lane (eq.16-17) and decoding-temperature head (eq.18) are equivalent
-    reparametrisations for numerical precision / unembedding and are not required
-    for the core fixed-depth residual formulation.
-    """
-
-    def __init__(self, config, layer_index):
-        super().__init__()
-        d = config.n_embd
-        self.C = config.nag_num_directions
-        if self.C < 1:
-            raise ValueError("nag_num_directions must be >= 1")
-        self.beta = float(config.nag_beta)
-        if self.beta <= 0.0:
-            raise ValueError("nag_beta must be > 0")
-        if layer_index < 1:
-            raise ValueError("NAG layer_index must be >= 1")
-        self.sqrt_d = float(d) ** 0.5
-        self.eps = 1e-6
-        # eq.24: alpha_l = 1 / l**p  (trainable scalar; p=0.5 => eq.23 = 1/sqrt(l))
-        self.alpha = nn.Parameter(torch.tensor(1.0 / (float(layer_index) ** config.nag_init_p)))
-        # eq.13 norm modulator: C learned preferred directions w_i, biases b_i, and
-        # softmax coefficients p_i over learnable logits (convex combination => [0,1]).
-        self.w = nn.Parameter(torch.empty(self.C, d))
-        torch.nn.init.normal_(self.w, mean=0.0, std=0.02)
-        self.b = nn.Parameter(torch.zeros(self.C))
-        self.p_logits = nn.Parameter(torch.zeros(self.C))
-
-    def forward(self, x, branch_out):
-        d = x.size(-1)
-        # eq.3-5: scale-only normalization of the residual stream to norm sqrt(d).
-        x_norm = torch.linalg.vector_norm(x, dim=-1, keepdim=True).clamp_min(self.eps)
-        r_bar = x * (self.sqrt_d / x_norm)          # ||r_bar|| = sqrt(d)
-        rho = x_norm / self.sqrt_d                   # scalar residual norm (per token)
-        # feature-wise centering of the layer output (paper: last op inside f_l).
-        f = branch_out - branch_out.mean(dim=-1, keepdim=True)
-        # eq.10: orthogonalize f against the residual direction (||r_bar||^2 = d).
-        proj = (f * r_bar).sum(dim=-1, keepdim=True) / d
-        f_perp = f - proj * r_bar
-        # eq.12: normalize the orthogonal component to norm sqrt(d).
-        fp_norm = torch.linalg.vector_norm(f_perp, dim=-1, keepdim=True).clamp_min(self.eps)
-        u = f_perp * (self.sqrt_d / fp_norm)
-        # eq.13: norm modulator m ∈ [0,1].
-        gates = torch.sigmoid(F.linear(r_bar, self.w, self.b))   # (..., C)
-        p = torch.softmax(self.p_logits, dim=0)                  # (C,)
-        conv = torch.matmul(gates, p).unsqueeze(-1)              # convex comb ∈ [0,1], (..., 1)
-        m = conv.clamp_min(self.eps) ** self.beta
-        # eq.14: rho*r_bar == x, so R_{l+1} = x + rho * alpha * m * N_out(f_perp).
-        return x + rho * self.alpha * m * u
-
-
 class Block(nn.Module):
     """
     A single Transformer block with attention and MLP layers.
@@ -494,6 +418,7 @@ class Block(nn.Module):
         self.attn = get_attention(config, depth)
         self.ln_2 = get_norm(config)
         self.mlp = get_mlp(config, depth)  # Pass depth for STEM layer selection
+        self.use_hybrid_norm = getattr(config, "use_hybrid_norm", False)
 
         # Optional norm layers as per Gemma2
         self.ln_3 = get_norm(config) if config.use_pre_post_norm else None
@@ -503,26 +428,13 @@ class Block(nn.Module):
         self.res_w1 = nn.Parameter(torch.ones(1)) if config.use_res_weights else None
         self.res_w2 = nn.Parameter(torch.ones(1)) if config.use_res_weights else None
 
-        # NAG norm-agnostic residual (arXiv:2606.16112): one module per sub-layer.
-        # Global NAG-layer index l (1-based): attn = 2*depth+1, mlp = 2*depth+2.
-        if config.use_nag_residual:
-            self.nag_attn = NAGResidual(config, 2 * depth + 1)
-            self.nag_mlp = NAGResidual(config, 2 * depth + 2)
-        else:
-            self.nag_attn = None
-            self.nag_mlp = None
-
-    def _process_branch(self, x, ln_pre, branch_fn, ln_post=None, res_weight=None, nag=None, **kwargs):
+    def _process_branch(self, x, ln_pre, branch_fn, ln_post=None, res_weight=None, **kwargs):
         # Process input through branch (attention or MLP)
         branch_out = branch_fn(ln_pre(x), **kwargs)
 
         # Apply optional post-normalization
         if ln_post is not None:
             branch_out = ln_post(branch_out)
-
-        # NAG norm-agnostic residual update replaces the additive residual add.
-        if nag is not None:
-            return nag(x, branch_out)
 
         # Apply optional residual weight
         if res_weight is not None:
@@ -531,10 +443,10 @@ class Block(nn.Module):
 
     def forward(self, x, **kwargs):
         # Attention branch (doesn't need kwargs)
-        x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1, self.nag_attn)
+        x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1)
 
         # MLP branch - pass kwargs through
-        x = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, self.res_w2, self.nag_mlp, **kwargs)
+        x = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, self.res_w2, **kwargs)
 
         return x
 
