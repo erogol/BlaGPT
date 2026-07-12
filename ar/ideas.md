@@ -239,7 +239,7 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Notion: mark Better Attention Priors [x] IMPLEMENTED (F74 sink component + F79 relative component).
 
 
-## F79 (NAG — Norm-Agnostic Residual) — "Scaling Adaptive Depth with Norm-Agnostic Residual Networks", Figliolia & Millidge (Zyphra, 2026, arXiv:2606.16112)
+## F80 (NAG — Norm-Agnostic Residual) — "Scaling Adaptive Depth with Norm-Agnostic Residual Networks", Figliolia & Millidge (Zyphra, 2026, arXiv:2606.16112)
 - Paper read: extracted from the arXiv PDF (pdftotext), Sec. III-A "The Norm-Agnostic Residual Stream Network", Eqs. 3-24 (not the abstract). Core claim: because the residual stream is updated additively, its norm grows with depth (up to 120x vs a norm-agnostic model in the paper's ablations); later layers must emit ever-larger updates just to keep the same relative effect, so their contribution is systematically suppressed (an "inhibitory" norm-dependent decay). NAG makes each layer's contribution independent of the current residual norm by separating magnitude from direction. We implement ONLY the core residual formulation; the Mixture-of-Depths part is out of scope (fixed-depth 10-layer harness).
 - Mechanism (exact, paper Eqs. 3-15, implemented as the drop-in Eq. 14):
   - Eq.3-5: scale-only input normalization. R_bar_l = N_in(R_l) = sqrt(d) R_l / ||R_l||, and the scalar norm rho_l = ||R_l||_2 / sqrt(d), so R_l = rho_l R_bar_l (||R_bar_l|| = sqrt(d)).
