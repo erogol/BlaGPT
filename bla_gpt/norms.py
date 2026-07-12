@@ -39,3 +39,15 @@ class DyTNorm(nn.Module):
     def forward(self, x):
         x = torch.tanh(self.alpha * x)
         return self.gamma * x + self.beta
+
+
+class PreAffineRMSNorm(nn.Module):
+    """Qiu et al. 2026 (arXiv:2601.22966) Sec.3.3: RMSNorm(lambda1 * x) with trainable lambda1 init=ones."""
+
+    def __init__(self, ndim, eps=1e-8):
+        super().__init__()
+        self.lambda1 = nn.Parameter(torch.ones(ndim))
+        self.norm = RMSNorm(ndim, eps=eps)
+
+    def forward(self, x):
+        return self.norm(self.lambda1 * x)
