@@ -257,3 +257,31 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Config: ar/full_train/configs/F80_nag.json — byte-for-byte copy of ar/best_config.json (F77 canonical best: XSA + GOAT sink + GatedNorm rank16, AttnRes, Muon, rope_theta 1e6) with ONLY the NAG gate fields added (use_nag_residual: true, nag_num_directions: 32, nag_beta: 1.0, nag_init_p: 0.5); verified 5-line diff, nothing else changed.
 - Status: READY FOR FULL RUN (not yet trained). No smoke run performed.
 - Notion: mark NAG Norm-AGnostic Residual [x] PREPARED (F80, config-gated `use_nag_residual`, default off).
+
+## F81 audit — Affine-Scaled Attention (arXiv:2602.23057, Bae et al., 2026, ICML)
+- Paper: "Affine-Scaled Attention: Towards Flexible and Stable Transformer Attention", Bae et al., NAVER Cloud, ICML 2026.
+- Read the full arXiv HTML (2602.23057v1).
+- Mechanism (Eq. 6-9): Replaces standard softmax attention with [alpha(X) * softmax(QK^T/sqrt(dk)) + beta(X)] @ V, where alpha(X) = sigmoid(W_alpha @ X) is a per-head input-dependent scalar scale, and beta(X) = (alpha_ma - alpha(X)) / N is a bias tracking deviation from EMA of alpha (alpha_ma, momentum rho=0.95). N = key sequence length.
+- Key insight: Softmax forces attention weights to sum to 1. Affine scaling relaxes this, allowing the model to control both relative distribution and overall scale. The bias term ensures V representations remain reflected even when alpha is small.
+- Relationship to existing stack: GOAT sink prior already relaxes the simplex constraint via a learnable denominator term. Affine-scaled attention is complementary — it modulates the *output* scale rather than the *denominator*. Gated Attention (already in best config) applies a post-attention multiplicative gate, which is similar but operates after the softmax*V product, not on the softmax weights themselves.
+- Repo adaptation: `AffineScaledAttention` in `bla_gpt/attentions.py`, subclass of `GOATSinkAttention`. Config gates: `use_affine_scaled_attn` (bool, default False), `affine_attn_momentum` (float, default 0.95). W_alpha is zero-initialized so alpha = sigmoid(0) = 0.5 at init. Uses manual attention path (not SDPA) since affine scaling modifies softmax weights directly.
+- Class: ARCH (attention mechanism modification, transferable across depths/scales).
+- F81 config = best_config + use_affine_scaled_attn=true, affine_attn_momentum=0.95 (single added key pair, no other changes).
+
+## F82 audit — HybridNorm (arXiv:2503.04598, Zhuo et al., 2026, ICML)
+- Paper: "HybridNorm: Towards Stable and Efficient Transformer Training via Hybrid Normalization"
+- Read the full arXiv HTML (2503.04598v1). Eqs. 7-9.
+- Mechanism: Combines QKV normalization in attention (norm Q, K, V individually before SDPA) with Post-Norm in FFN (residual path is normalized: X = FFN(Norm(Y)) + Norm(Y)). Stabilizes training while improving performance vs both Pre-Norm and Post-Norm.
+- Repo adaptation: `use_hybrid_norm` config gate (bool, default False). V-norm added to Attention base class (`v_norm = RMSNorm(head_dim)`), applied after _prepare_qkv. FFN post-norm in Block._process_branch via `hybrid_norm=True` flag — residual path uses `ln_pre(x)` instead of raw `x`.
+- Class: ARCH (normalization strategy, transferable).
+- F82 config = best_config + use_hybrid_norm=true (single added key, no other changes).
+- Tests: forward+backward pass verified, v_norm present, 165/165 existing tests pass.
+
+## F84 audit — Composable Gated Attention (arXiv:2505.06708, Qwen Team, 2025)
+- Paper: "Gated Attention for Large Language Models" — head-specific sigmoid gates applied after SDPA: Y = Y * sigmoid(X * W_gate). Eliminates attention sink phenomenon, improves stability.
+- Repo already has standalone GatedAttention (replaces attention type entirely). "Composable" version extends GOATSinkAttention instead, preserving XSA + GOAT sink prior stack while adding the gate on top.
+- Mechanism: gate_proj (n_embd -> n_embd, zero-initialized so sigmoid(0)=0.5 at start) applied to pre-norm input, reshaped to per-head, multiplied with attention output.
+- Config gate: `use_composable_gated_attn` (bool, default False). Branch ordering in get_attention: composable checked before plain GOAT (since it extends GOATSinkAttention).
+- Class: ARCH (attention mechanism, composable with existing stack).
+- F84 config = best_config + use_composable_gated_attn=true.
+- Tests: forward+backward verified, gate_proj present, sink_prior inherited, regression OK.
