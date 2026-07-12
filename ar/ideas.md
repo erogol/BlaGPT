@@ -124,7 +124,7 @@ NOT implemented (invent-slot candidates, minimal config-gated impl):
 - [ ] Attention Residuals (Kimi/MoonshotAI PDF) — HIGH PRIORITY: lightweight, attention-output residual
 - [ ] Polar Coordinate PE / PoPE (2509.10534) — pos_encoding registry candidate
 - [ ] NAG Norm-AGnostic Residual (Zyphra, X post) — residual rescaling scheme
-- [ ] Aurora optimizer (Tilde blog) — leverage-aware for rectangular matrices, optimizer registry
+- [x] Aurora optimizer (arXiv:2606.27715, Tilde Research) — PREPARED (F73, config-gated `optimizer_name=Aurora`, default off); see F73 audit below
 - [x] Tapered Language Models (2606.23670) — IMPLEMENTED (F72, config-gated `use_tapered_mlp`, default off); see F72 audit below
 - [ ] Better Attention Priors (2601.15380) — read first
 - [ ] Unified Attention/Residual Sinks (2601.22966) — outlier-driven rescaling
@@ -155,3 +155,28 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - F72 config = combined_keeps full baseline + use_tapered_mlp=true (single added key, no other change). base_d_ff = mlp_expand*n_embd = 10*768 = 7680, L=10 -> per-layer widths [11520, 11264, 10624, 9600, 8320, 7040, 5760, 4736, 4096, 3840], sum = 76800 = 10*7680 (budget preserved).
 - Class: ARCH (depth-aware capacity allocation is a transferable architecture change, not a schedule knob).
 - Full result: F72 completed all 5100 steps from random init via normal train.py; final val_loss 3.2372 vs baseline 3.2354 (+0.0018). Decision: DISCARD. No confirmation required because it did not improve. Checkpoint: bla_gpt/logs/ar_full_F72_0/state_step005100.pt.
+
+
+## F73 (GOAT sink prior) — "You Need Better Attention Priors", Litman & Guo (2026, arXiv:2601.15380)
+- Mechanism: per-head key-only log-prior u added to XSA attention logits before softmax: softmax(qk^T/sqrt(d) + u(j)); u(j) is non-zero only at j=0 (sink position), one scalar per head, initialized to zero. No Fourier component.
+- Adaptation: GOATSinkAttention(ExclusiveSelfAttention) in bla_gpt/attentions.py; gate: GPTConfig.use_goat_sink_prior (default False); F73 = F72 minus use_tapered_mlp plus use_goat_sink_prior=true.
+- Status: PENDING SMOKE
+
+
+## F73 (Aurora optimizer) — "Aurora: A Leverage-Aware Spectral Optimizer", Dewulf, Pai, Yang, Zhang, Keigwin (2026, arXiv:2606.27715; official code github.com/tilde-research/aurora-release)
+- NOTE ON LABEL: this Aurora F73 supersedes the abandoned uncommitted GOATSink "F73" draft above for the F73 full-run slot (`ar/full_runs/F73/`). The GOATSink working-tree changes are left untouched, not part of this change.
+- Read the actual paper abstract + the official reference source (src/aurora.py, src/polar.py, README) — NOT just the blog title.
+- Problem it fixes: Muon's update is polar(G)=U V^T (all singular values -> 1), but for TALL/rectangular matrices (MLP up/down projections) polar(G) has highly non-uniform left-singular ROW norms. Some rows (neurons) receive persistently tiny updates and stop contributing -> a self-reinforcing dead-neuron loop. Naive row-normalization fixes uniformity but pushes the update off the momentum matrix's polar factor (harmful). Aurora enforces row-uniformity WHILE staying on the polar geometry; reported gains over Muon GROW with the MLP expansion factor (this repo runs mlp_expand=10, so Aurora is well-matched).
+- Mechanism / exact update (vendored byte-for-byte):
+  1. Nesterov SGD-momentum: m <- lerp(m, G, 1-mu) = mu*m + (1-mu)*G; update = lerp(G, m, mu) = (1-mu)*G + mu*m (nesterov; else m.clone()).
+  2. Leverage-uniform polar: if square (m==n) -> update = polar(update) (reduces to Muon). Else transpose wide->tall, set target_row_sq = n/m, D = 1/rownorm(G); for k in range(pp_iterations): U = polar(D*G); if not last: row_sq = sum_j U^2; D <- D * (target_row_sq/row_sq)^pp_beta. Diagonal preconditioner D drives every output-row norm of the polar factor to the same value (projection onto the intersection of the row-oblique and Stiefel manifolds) without leaving the polar factor.
+  3. Spectral aspect-ratio scaling (Muon convention): update *= max(1, m/n)^0.5.
+  4. Decoupled weight decay then apply: W *= (1 - eta*wd); W -= eta*update.
+  polar(): 12-step simple-quintic Newton-Schulz p(s)=2s-1.5s^3+0.5s^5 (fixed points {0,1,sqrt2}, s=1 super-attracting), bf16; matches modded-nanogpt track-3 baseline byte-for-byte.
+  Paper/reference defaults: eta=0.05, weight_decay=0.025, mu=0.95, nesterov=True, pp_iterations=2, pp_beta=0.5, eps=1e-7.
+- Repo adaptation (smallest faithful diff): `bla_gpt/optimizers/aurora.py` vendors `polar()` and `aurora()` verbatim from aurora-release, plus `Aurora(torch.optim.Optimizer)` that MIRRORS `optimizers/muon.py`: 2D matrix params (ndim>=2, excluding embed/lm_head) -> `aurora()` with a per-param momentum buffer; 1D params + embedding + lm_head -> an internal AdamW backup identical to muon.py's. Uses a 2D view so any >2D matrix reduces to (rows, -1) like Muon. Registry: added `elif optimizer_name.lower()=="aurora"` in `optimizers/__init__.py`, mirroring the muon branch's exact param split, returning `Aurora(lr, aurora_params, adamw_params, **optimizer_params)`. Default-off => Aurora is constructed ONLY when optimizer_name==aurora; every existing branch and the Muon baseline path are byte-unchanged.
+- LR CALIBRATION FLAG (launch-time): Muon in this repo multiplies lr by `adjust_lr_for_muon` = 0.2*sqrt(max(A,B)) (large effective LR), and the baseline `learning_rate` default (0.001) is tuned to that. Aurora applies `eta = learning_rate` DIRECTLY (only the aspect-ratio sqrt scale, no per-matrix sqrt(dim) blow-up), so eta=0.001 is far below the paper's eta=0.05. Per the "only required Aurora fields / no default changes" scope, `learning_rate` was NOT changed here — this is a KNOWN pre-launch calibration item (raise eta toward ~0.05, or add a lr override) before F73 is actually run.
+- F73 config = `ar/best_config.json` (canonical combined-keeps baseline) with ONLY two changes: optimizer_name "Muon"->"Aurora" and optimizer_args -> {weight_decay:0.025, mu:0.95, nesterov:true, pp_iterations:2, pp_beta:0.5} (paper defaults; eps uses class default 1e-7). All model/arch keys identical to baseline; learning_rate untouched.
+- Class: OPT (leverage-aware spectral optimizer for rectangular matrices — a transferable optimizer mechanism, not a schedule knob).
+- Tests: `tests/test_aurora_optimizer.py` — default-off registry unchanged (Muon still built), Aurora registry construction + param split, finite one/multi-step updates on rectangular (tall+wide) and vector params, state_dict roundtrip, tiny forward/backward through get_optimizer. No debug metric used.
+- Full result: F73 completed all 5100 steps from random init via normal train.py; final val_loss 3.3286 vs baseline 3.2354 (+0.0932). Decision: DISCARD. No confirmation required because it did not improve. Checkpoint: bla_gpt/logs/ar_full_F73_0/state_step005100.pt.
