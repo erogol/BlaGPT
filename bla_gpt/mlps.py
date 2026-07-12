@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -47,12 +49,72 @@ def semi_orthogonal_init(dim_in, dim_out, steps=5):
     return weight.float()
 
 
+def tapered_mlp_dims(base_d_ff, n_layer, multiple=64):
+    """Per-layer MLP intermediate widths under a cosine taper.
+
+    Tapered Language Models (Bayat, Behrouz & Courville 2026, arXiv:2606.23670):
+    earlier layers get more MLP capacity, later layers less, under a fixed total
+    budget. Paper Eq. 5 cosine schedule with the default d_start/d_end = 1.5/0.5
+    endpoints:
+
+        d_ff(l) = base_d_ff * (1 + 0.5 * cos(pi * l / (L - 1)))
+
+    Widths are snapped to the repo's width-alignment granularity (``multiple``,
+    64 as used for vocab/embedding sizing) and interior layers are nudged in
+    ``multiple``-sized steps so the aggregate equals n_layer * base_d_ff exactly
+    (paper Eq. 7) while staying monotonically non-increasing.
+    """
+    L = int(n_layer)
+    base_d_ff = int(base_d_ff)
+    if L <= 1:
+        return [base_d_ff]
+    target = base_d_ff * L
+    if target % multiple != 0:
+        raise ValueError(
+            "n_layer*base_d_ff (%d) must be a multiple of %d" % (target, multiple)
+        )
+
+    def _snap(x):
+        return int(round(x / multiple)) * multiple
+
+    raw = [base_d_ff * (1.0 + 0.5 * math.cos(math.pi * l / (L - 1))) for l in range(L)]
+    dims = [_snap(r) for r in raw]
+    # Pin endpoints exactly to the aligned d_start / d_end (paper fixes the ends).
+    dims[0] = _snap(1.5 * base_d_ff)
+    dims[-1] = _snap(0.5 * base_d_ff)
+    # Cosine schedule is non-increasing; keep it so after snapping.
+    for l in range(1, L):
+        if dims[l] > dims[l - 1]:
+            dims[l] = dims[l - 1]
+    # Nudge interior widths in `multiple` steps to hit the exact budget while
+    # preserving monotone non-increasing order and the pinned endpoints.
+    guard = 0
+    while sum(dims) != target:
+        guard += 1
+        if guard > 100000:
+            raise RuntimeError("tapered_mlp_dims failed to converge")
+        if target - sum(dims) > 0:
+            cand = [l for l in range(1, L - 1) if dims[l] + multiple <= dims[l - 1]]
+            if not cand:
+                raise RuntimeError("tapered_mlp_dims: no feasible layer to grow")
+            l = max(cand, key=lambda i: raw[i] - dims[i])
+            dims[l] += multiple
+        else:
+            cand = [l for l in range(1, L - 1)
+                    if dims[l] - multiple >= dims[l + 1] and dims[l] - multiple > 0]
+            if not cand:
+                raise RuntimeError("tapered_mlp_dims: no feasible layer to shrink")
+            l = max(cand, key=lambda i: dims[i] - raw[i])
+            dims[l] -= multiple
+    return dims
+
+
 class Primer_MLP(nn.Module):
     # from 🎩 https://gist.github.com/tysam-code/b3519fd58ce5c94d1016c8903e50736d
-    def __init__(self, config):
+    def __init__(self, config, ff_dim=None):
         super().__init__()
         expand = getattr(config, "mlp_expand", 4)
-        expand_dim = expand * config.n_embd
+        expand_dim = expand * config.n_embd if ff_dim is None else int(ff_dim)
         self.c_fc_scale = nn.Parameter(torch.ones(config.n_embd))
         self.c_fc = nn.Parameter(semi_orthogonal_init(config.n_embd, expand_dim))
         self.c_proj = nn.Parameter(torch.zeros(config.n_embd, expand_dim))
