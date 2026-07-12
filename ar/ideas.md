@@ -192,3 +192,18 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Config: ar/full_train/configs/F76_pre_affine_norm.json -- byte-for-value copy of ar/full_runs/F74c/config.json with only use_pre_affine_norm: true added.
 - Status: PENDING SMOKE RUN (not yet trained).
 - Full result: F76 completed 5100 steps from random init; val_loss 3.2405 vs confirmed best 3.2298 (+0.0107). Decision: DISCARD. No confirmation required. Checkpoint: bla_gpt/logs/ar_full_F76_0/state_step005100.pt.
+
+
+## F77 (GatedNorm) -- "A Unified View of Attention and Residual Sinks: Outlier-Driven Rescaling is Essential for Transformer Training", Qiu et al. (2026, arXiv:2601.22966)
+- Paper: Qiu et al. 2026 (same paper as F76/PreAffineRMSNorm). Sec.3.4 proposes a complementary post-norm gating mechanism to adaptively suppress outlier activations in the normalized output stream.
+- Mechanism (paper Sec.3.4, exact equations):
+    y  = RMSNorm(x)
+    yg = sigmoid(W_up(swish(W_down(y))))    -- W_down in R^{d x r}, W_up in R^{r x d}, rank r=16
+    y' = yg odot y
+  The low-rank bottleneck (rank r << d) bounds the parameter cost to 2*d*r per norm site (~6K params at d=768, r=16) while allowing per-feature output gating. Not combined with PreAffineRMSNorm (Sec.3.3).
+- Initialization (paper-faithful near-identity with stable gradient flow): W_up initialized to zeros => gate=sigmoid(0)=0.5 at step 0 (half-identity, not exact 1.0 -- exact identity would require pre-sigmoid >> 0 which kills gradients). W_down uses PyTorch default Kaiming-normal, so swish(W_down(y)) is non-zero for typical y => gradients reach W_up from step 1. W_down gradients are zero at step 0 (W_up=0) but non-zero once W_up updates; mirrors standard LoRA-style bottleneck init (B=0, A=Kaiming). This is the cleanest paper-faithful near-identity init that preserves gradient flow at every parameter.
+- Adaptation: GatedNorm class added to bla_gpt/norms.py; wrapped via get_norm(config) factory in bla_gpt/bla_gpt.py. Gates: GPTConfig.use_gated_norm (bool, default False), GPTConfig.gated_norm_rank (int, default 16). When off, get_norm is byte-identical to before. Applied to all sites built through get_norm (ln_1, ln_2, ln_f; ln_3/ln_4 if use_pre_post_norm). Not combined with use_pre_affine_norm. Parent config: F74c (GOAT retained).
+- Class: ARCH (post-norm output gating -- transferable mechanism; 2*d*r params per norm site per layer).
+- Tests: tests/test_gated_norm.py -- gate-off returns RMSNorm; gate-on returns GatedNorm; W_up init=zeros; gate=0.5 at init; output changes after W_up perturbed; gradients reach W_down (with non-zero W_up); gradients reach W_up (Kaiming W_down ensures non-zero swish); shape/dtype preserved; state_dict roundtrip; full GPT gate-off all norms are RMSNorm; full GPT gate-on all norms are GatedNorm (11 tests, all CPU, all pass).
+- Config: ar/full_train/configs/F77_gated_norm.json -- byte-for-value copy of ar/full_runs/F74c/config.json with only use_gated_norm: true and gated_norm_rank: 16 added.
+- Status: COMPLETE — KEEP. Full 5100-step run from random init reached val_loss 3.2230, improving on confirmed best F74c=3.2298 by 0.0068. No confirmation rerun required because improvement is >=0.003. Checkpoint: bla_gpt/logs/ar_full_F77_0/state_step005100.pt.

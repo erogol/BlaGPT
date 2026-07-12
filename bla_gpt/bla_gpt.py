@@ -24,7 +24,7 @@ from mlps import (MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, PolyNorm_MLP,
                   PolyReLU_MLP, Primer_MLP, STEM_MLP, SwiGLU_MLP, tapered_mlp_dims)
 from modules.canon_layer import CanonLayer
 from modules.pattention import Pattention
-from norms import DyTNorm, LayerNorm, PreAffineRMSNorm, RMSNorm
+from norms import DyTNorm, GatedNorm, LayerNorm, PreAffineRMSNorm, RMSNorm
 from torch.nn import functional as F
 
 #
@@ -119,6 +119,8 @@ class GPTConfig(Coqpit):
     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
     use_goat_sink_prior: bool = False  # GOAT key-only sink prior (arXiv:2601.15380, Litman & Guo, 2026)
     use_pre_affine_norm: bool = False  # PreAffineRMSNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.3
+    use_gated_norm: bool = False  # GatedNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.4
+    gated_norm_rank: int = 16  # bottleneck rank r for GatedNorm low-rank gate
     attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
 
     # Engram: N-gram hash memory lookup
@@ -335,6 +337,8 @@ def get_attention(config, depth=None):
 
 def get_norm(config):
     if config.norm_layer == "rmsnorm":
+        if getattr(config, "use_gated_norm", False):
+            return GatedNorm(config.n_embd, rank=getattr(config, "gated_norm_rank", 16))
         if getattr(config, "use_pre_affine_norm", False):
             return PreAffineRMSNorm(config.n_embd)
         return RMSNorm(config.n_embd)

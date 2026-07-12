@@ -51,3 +51,30 @@ class PreAffineRMSNorm(nn.Module):
 
     def forward(self, x):
         return self.norm(self.lambda1 * x)
+
+
+class GatedNorm(nn.Module):
+    """Qiu et al. 2026 (arXiv:2601.22966) Sec.3.4: low-rank sigmoid gate applied after RMSNorm.
+
+    y  = RMSNorm(x)
+    yg = sigmoid(W_up(swish(W_down(y))))   # W_down: d->r, W_up: r->d
+    y' = yg * y
+
+    Init: W_up=zeros so gate=sigmoid(0)=0.5 at step 0 (half-identity).
+    W_down is Kaiming-normal (default), so swish(W_down(y)) is non-zero for typical y,
+    ensuring gradients reach W_up immediately. As W_up trains toward positive weights the
+    gate converges toward 1. W_down gradients are zero at step 0 (W_up=0) but non-zero
+    once W_up is updated. This mirrors the standard LoRA-style bottleneck init (B=0).
+    """
+
+    def __init__(self, ndim, rank=16, eps=1e-8):
+        super().__init__()
+        self.norm = RMSNorm(ndim, eps=eps)
+        self.W_down = nn.Linear(ndim, rank, bias=False)
+        self.W_up = nn.Linear(rank, ndim, bias=False)
+        nn.init.zeros_(self.W_up.weight)
+
+    def forward(self, x):
+        y = self.norm(x)
+        gate = torch.sigmoid(self.W_up(F.silu(self.W_down(y))))
+        return gate * y

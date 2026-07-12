@@ -5,3 +5,4 @@ F73	b495754	e383d96	3.3286	discard	aurora_optimizer	bla_gpt/logs/ar_full_F73_0/s
 F74	212fca1	e383d96	3.2352	keep_confirmed	goat_per_head_key0_sink_prior	bla_gpt/logs/ar_full_F74_0/state_step005100.pt	Confirmed by F74c=3.2298; both beat 3.2354 baseline; primary improvement -0.0002
 F74c	7538494	F74	3.2298	confirm_keep	goat_per_head_key0_sink_prior	bla_gpt/logs/ar_full_F74c_0/state_step005100.pt	Mandatory independent full confirmation from random init; -0.0056 vs baseline
 F76	fbdb605	F74c	3.2405	discard	pre_affine_rmsnorm	bla_gpt/logs/ar_full_F76_0/state_step005100.pt	Full 5100-step run; +0.0107 vs confirmed best 3.2298; no confirmation because not lower
+F77	6acdbc1	F74c	3.2230	keep	gated_norm_rank16	bla_gpt/logs/ar_full_F77_0/state_step005100.pt	Full 5100-step run; -0.0068 vs confirmed best F74c=3.2298; clean keep, no confirmation required because improvement >=0.003
