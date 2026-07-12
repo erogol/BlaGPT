@@ -1,0 +1,6 @@
+started_utc=2026-07-12T04:49:16Z
+git_commit=6acdbc14fd47a6e884d125e60f3578b68dbac1b9
+run_name=ar_full_F77
+config=/nvme/BlaGPT/ar/full_runs/F77/config.json
+exit_code=0
+checkpoint_dir=/nvme/BlaGPT/bla_gpt/logs/ar_full_F77_0
