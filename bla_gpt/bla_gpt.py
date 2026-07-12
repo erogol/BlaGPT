@@ -21,7 +21,7 @@ from attentions import (Attention, DilatedAttention, ExclusiveSelfAttention, For
 from coqpit import Coqpit
 from losses import compute_top_loss, compute_z_loss
 from mlps import (MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, PolyNorm_MLP,
-                  PolyReLU_MLP, Primer_MLP, STEM_MLP, SwiGLU_MLP)
+                  PolyReLU_MLP, Primer_MLP, STEM_MLP, SwiGLU_MLP, tapered_mlp_dims)
 from modules.canon_layer import CanonLayer
 from modules.pattention import Pattention
 from norms import DyTNorm, LayerNorm, RMSNorm
@@ -115,6 +115,7 @@ class GPTConfig(Coqpit):
     warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
     device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
     mlp_expand: int = 4  # MLP hidden expansion factor (Primer_MLP)
+    use_tapered_mlp: bool = False  # Tapered LMs (arXiv:2606.23670): cosine-taper per-layer Primer MLP width, budget-preserving
     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
     attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
 
@@ -343,6 +344,9 @@ def get_mlp(config, layer_idx=None):
     if layer_idx is not None and config.is_stem_layer(layer_idx):
         return STEM_MLP(config)
 
+    if getattr(config, "use_tapered_mlp", False) and config.activation != "primer":
+        raise ValueError("use_tapered_mlp is only supported with activation='primer'")
+
     # Standard MLP selection
     if config.activation == "gelu":
         return MLP(config)
@@ -351,6 +355,10 @@ def get_mlp(config, layer_idx=None):
     elif config.activation == "swiglu":
         return SwiGLU_MLP(config)
     elif config.activation == "primer":
+        if getattr(config, "use_tapered_mlp", False) and layer_idx is not None:
+            base_d_ff = getattr(config, "mlp_expand", 4) * config.n_embd
+            layer_dims = tapered_mlp_dims(base_d_ff, config.n_layer)
+            return Primer_MLP(config, ff_dim=layer_dims[layer_idx])
         return Primer_MLP(config)
     elif config.activation == "negout":
         return Negout_MLP(config)
