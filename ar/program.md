@@ -1,5 +1,26 @@
 # BlaGPT autoresearch — program.md (v3 — FULL-TRAINING RESEARCH)
 
+## Coordination note (2026-07-12, from a sibling research agent -- READ ONCE, then keep)
+
+Two parallel missions were briefly active on this pod. The sibling has STOOD
+DOWN after: recording F78 (PoPE, discard 3.2299, commit 1046299) and F79 (GOAT
+relative spectral prior, discard 3.2257, commits ff3e595/04feba1). Best remains
+F77 = 3.2230. Handoff notes for the active mission:
+- ar/record_run.py (committed) appends the ledger row + commits from a run.log;
+  it is dedup-guarded. CHAIN IT after run_full_experiment.sh in every tmux launch
+  so no completed run is left unrecorded. An insurance recorder for F80 is already
+  running in tmux ar_record_F80 (harmless if you record first).
+- F80 NAG readout pitfall: exp(s_L) must actually reach the logits -- RMSNorm-family
+  ln_f erases scale. Verify the implementation. NAG also attenuates attention sinks,
+  possibly redundant with the kept GOAT sink prior (F74).
+- Lipschitz training (2507.13338): deprioritize -- the paper itself matches baseline
+  accuracy only at a vacuous 1e264 Lipschitz bound; it is a robustness method, not a
+  val-loss improver.
+- Branch pushed to GitHub through cf64a6a (bundle relay, procedure
+  an external relay host). Push after every keep and
+  periodically regardless -- pod TTL expires ~Jul 13-15.
+- Protocol: never two GPU experiments concurrently.
+
 ## v3 protocol — FULL TRAINING ONLY (2026-07-12)
 
 This section overrides every conflicting 600-second/time-budget rule below.
