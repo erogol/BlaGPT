@@ -139,6 +139,25 @@ def get_optimizer(
     elif optimizer_name.lower() == "biclip":
         from optimizers.bliclip import BiClipSGD_Full
         return BiClipSGD_Full(parameters, lr=lr, **optimizer_params)
+    elif optimizer_name.lower() == "aurora":
+        module = importlib.import_module("optimizers.aurora")
+        optimizer = getattr(module, "Aurora")
+        aurora_params = [
+            p
+            for name, p in model.named_parameters()
+            if p.ndim >= 2 and "embed_tokens" not in name and "lm_head" not in name
+        ]
+        adamw_params = [
+            p
+            for name, p in model.named_parameters()
+            if p.ndim < 2 or "embed_tokens" in name or "lm_head" in name
+        ]
+        return optimizer(
+            lr=lr,
+            aurora_params=aurora_params,
+            adamw_params=adamw_params,
+            **optimizer_params,
+        )
     else:
         optimizer = getattr(torch.optim, optimizer_name)
     return optimizer(parameters, lr=lr, **optimizer_params)
