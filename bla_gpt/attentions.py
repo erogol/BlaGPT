@@ -332,6 +332,52 @@ class ExclusiveSelfAttention(Attention):
         return self._apply_exclusion(y, v)
 
 
+
+class GOATSinkAttention(ExclusiveSelfAttention):
+    """XSA + GOAT key-only sink prior (arXiv:2601.15380, Litman & Guo, 2026).
+
+    Adds a trainable per-head log-prior u at key position 0 (the attention
+    sink) to the raw attention logits before softmax. Initialized to zero
+    so the model is byte-identical to XSA at the start of training.
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.sink_prior = nn.Parameter(torch.zeros(self.n_head))
+
+    def _flash_attention(self, q, k, v):
+        T_q, T = q.size(2), k.size(2)
+        # Combined causal + sink-prior additive mask
+        mask = torch.zeros(1, self.n_head, T_q, T, device=q.device, dtype=q.dtype)
+        causal = torch.triu(torch.ones(T_q, T, dtype=torch.bool, device=q.device), diagonal=1)
+        mask.masked_fill_(causal[None, None], float("-inf"))
+        mask[:, :, :, 0] = mask[:, :, :, 0] + self.sink_prior[None, :, None]
+        y = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=mask,
+            dropout_p=self.dropout if self.training else 0,
+            is_causal=False,
+        )
+        return self._apply_exclusion(y, v)
+
+    def _manual_attention(self, q, k, v, T_q, T):
+        if self.causal and self.mask is None:
+            self.mask = torch.tril(
+                torch.ones(T_q, T, dtype=torch.bool, device=q.device)
+            ).view(1, 1, T_q, T)
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        if self.soft_cap > 0:
+            att = soft_cap(att, self.soft_cap)
+        att[:, :, :, 0] = att[:, :, :, 0] + self.sink_prior[None, :, None]
+        att = att.masked_fill(self.mask[:, :, :T_q, :T] == 0, float("-inf"))
+        if self.use_softpick:
+            att = softpick(att, dim=-1)
+        else:
+            att = F.softmax(att, dim=-1)
+        att = self.attn_dropout(att)
+        y = att @ v
+        return self._apply_exclusion(y, v)
+
 class MultiHeadLatentAttention(Attention):
     def __init__(self, config):
         assert config.n_latentd > 0, "Must provide number of latent dimensions"
