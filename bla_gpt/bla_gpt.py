@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 
 from attentions import (Attention, DilatedAttention, ExclusiveSelfAttention, ForgettingAttention,
-                        GatedAttention, KDAAttention, KVShiftingAttention,
+                        GatedAttention, GOATSinkAttention, KDAAttention, KVShiftingAttention,
                         MultiheadDiffAttn, MultiheadDiffAttnv2, MultiHeadLatentAttention,
                         MultiTokenAttention, PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
@@ -117,6 +117,7 @@ class GPTConfig(Coqpit):
     mlp_expand: int = 4  # MLP hidden expansion factor (Primer_MLP)
     use_tapered_mlp: bool = False  # Tapered LMs (arXiv:2606.23670): cosine-taper per-layer Primer MLP width, budget-preserving
     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
+    use_goat_sink_prior: bool = False  # GOAT key-only sink prior (arXiv:2601.15380, Litman & Guo, 2026)
     attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
 
     # Engram: N-gram hash memory lookup
@@ -302,6 +303,8 @@ def get_attention(config, depth=None):
     if attn_type == "regular":
         return Attention(config)
     elif attn_type == "xsa":
+        if getattr(config, "use_goat_sink_prior", False):
+            return GOATSinkAttention(config)
         return ExclusiveSelfAttention(config)
     if attn_type == "latent":
         return MultiHeadLatentAttention(config)
