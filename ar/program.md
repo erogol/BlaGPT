@@ -1,4 +1,31 @@
-# BlaGPT autoresearch — program.md (v2.1 — FULL FREEDOM + INVENTION)
+# BlaGPT autoresearch — program.md (v3 — FULL-TRAINING RESEARCH)
+
+## v3 protocol — FULL TRAINING ONLY (2026-07-12)
+
+This section overrides every conflicting 600-second/time-budget rule below.
+
+- Every clean candidate is trained with normal `bla_gpt/train.py` for exactly
+  **5100 iterations** using 8 GPUs, global batch 512, device batch 32, sequence
+  length 1024, fixed validation data/tokens, and the normal LR schedule.
+- Baseline/crowned parent: combined-keeps full run, final val_loss **3.2354**,
+  checkpoint `bla_gpt/logs/combined_keeps_full_5100_0/state_step005100.pt`.
+  Experiments still start from RANDOM INIT; this checkpoint is comparison only.
+- Launch: `/nvme/BlaGPT/ar/run_full_experiment.sh <id> <config.json>` inside a
+  durable tmux session. Artifacts live in `ar/full_runs/<id>/`.
+- Keep iff final step-5100 validation loss is lower than the current full-run
+  best. Improvements below 0.003 require one full confirmation rerun. There is
+  no reuse of the old 600-second EPSILON.
+- Debugging may use at most a 60-second `train_ar.py` smoke run, but smoke
+  metrics NEVER enter the ledger and NEVER decide keep/discard.
+- Checkpointing stays enabled. Preserve the final/best checkpoint path in the
+  full-run ledger. Never run two GPU experiments concurrently.
+- Use `ar/full_results.tsv` as the canonical full-training ledger; do not mix
+  these results with `ar/results.tsv` (the old proxy ledger).
+- Paper implementations must be minimal and native to repo structure: smallest
+  viable diff, config-gated default-off, existing registries/classes, no broad
+  refactors. Read the actual paper before implementation.
+- Continue the Notion BlaGPT paper queue in `ideas.md`; prioritize mechanisms
+  with a real full-horizon transfer story. No schedule-budget gaming.
 
 ## Harness location (moved into repo 2026-07-10)
 
