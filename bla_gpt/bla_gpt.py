@@ -15,7 +15,8 @@ import torch
 import torch.nn as nn
 
 from attentions import (Attention, DilatedAttention, ExclusiveSelfAttention, ForgettingAttention,
-                        GatedAttention, GOATSinkAttention, KDAAttention, KVShiftingAttention,
+                        GatedAttention, GOATSinkAttention,
+    GOATRelPriorAttention, KDAAttention, KVShiftingAttention,
                         MultiheadDiffAttn, MultiheadDiffAttnv2, MultiHeadLatentAttention,
                         MultiTokenAttention, PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
@@ -118,6 +119,8 @@ class GPTConfig(Coqpit):
     use_tapered_mlp: bool = False  # Tapered LMs (arXiv:2606.23670): cosine-taper per-layer Primer MLP width, budget-preserving
     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
     use_goat_sink_prior: bool = False  # GOAT key-only sink prior (arXiv:2601.15380, Litman & Guo, 2026)
+    use_goat_rel_prior: bool = False  # GOAT relative spectral prior (arXiv:2601.15380 Sec. 6)
+    goat_rel_num_freqs: int = 8  # number of frequencies R in the GOAT relative prior ladder
     use_pre_affine_norm: bool = False  # PreAffineRMSNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.3
     use_gated_norm: bool = False  # GatedNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.4
     gated_norm_rank: int = 16  # bottleneck rank r for GatedNorm low-rank gate
@@ -306,6 +309,8 @@ def get_attention(config, depth=None):
     if attn_type == "regular":
         return Attention(config)
     elif attn_type == "xsa":
+        if getattr(config, "use_goat_rel_prior", False):
+            return GOATRelPriorAttention(config)
         if getattr(config, "use_goat_sink_prior", False):
             return GOATSinkAttention(config)
         return ExclusiveSelfAttention(config)
