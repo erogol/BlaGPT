@@ -16,6 +16,7 @@ cd "$ROOT"
   echo "config=$RUN_DIR/config.json"
 } > "$RUN_DIR/manifest.txt"
 cd "$ROOT/bla_gpt"
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 set +e
 torchrun --standalone --nproc_per_node=8 train.py \
   --model_name best --config "$RUN_DIR/config.json" --run_name "$RUN_NAME" \
