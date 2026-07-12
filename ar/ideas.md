@@ -161,3 +161,7 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Adaptation: GOATSinkAttention(ExclusiveSelfAttention) in bla_gpt/attentions.py; gate GPTConfig.use_goat_sink_prior, default false. F73 equals combined-keeps baseline plus use_goat_sink_prior=true.
 - Smoke: PASS — 60s train_ar.py, 191 steps, finite loss/gradients; smoke metric excluded from full ledger.
 - Full result: completed all 5100 steps from random init via normal train.py; final val_loss 3.3286 vs baseline 3.2354 (+0.0932). Decision: DISCARD. No confirmation required. Checkpoint: bla_gpt/logs/ar_full_F73_0/state_step005100.pt.
+
+## F74 — GOAT sink-prior full confirmation candidate
+- Same mechanism and canonical Muon baseline configuration as F73: per-head trainable key-0 log-prior, random initialization, 5100 normal train.py steps.
+- Full result: val_loss 3.2352 vs baseline 3.2354 (-0.0002). Status: CONFIRM_PENDING because improvement is below 0.003. Checkpoint: bla_gpt/logs/ar_full_F74_0/state_step005100.pt.
