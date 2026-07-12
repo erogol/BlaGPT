@@ -1,0 +1,4 @@
+started_utc=2026-07-12T08:39:53Z
+git_commit=bef34efa13acded2f73c82a415bdf229062b8cae
+run_name=ar_full_F78
+config=/nvme/BlaGPT/ar/full_runs/F78/config.json
