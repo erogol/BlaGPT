@@ -235,7 +235,7 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Transfer story: translation-equivariant prior is horizon-relevant (paper reports length extrapolation); complements the kept sink prior from the same EOT decomposition (Fig. 1: K = K_sink + K_rel).
 - Tests: tests/test_goat_rel_prior_f79.py (12 CPU tests, all pass): gate-off dispatch unchanged; gate-on dispatch; frequency-ladder values; zero rel-prior at init; zero-init output identity with GOATSinkAttention; translation equivariance of K_rel; alpha and beta perturbations change output; gradients reach alpha/beta/sink; state_dict roundtrip (non-persistent freq buffer excluded); shape/dtype; full GPT forward/backward on the F79 stack (XSA+GOAT sink+rel+GatedNorm). frozen_check: OK.
 - Config: ar/full_train/configs/F79_goat_rel_prior.json -- byte-for-value copy of ar/best_config.json (F77 canonical best) with ONLY use_goat_rel_prior: true and goat_rel_num_freqs: 8 added (verified two-key diff).
-- Status: LAUNCHED -- full 5100-step run from random init in tmux ar_full_F79.
+- Status: COMPLETE -- DISCARD. Full 5100-step run from random init (launch commit ff3e595) reached val_loss 3.2257 vs confirmed best F77=3.2230 (+0.0027). Very close but not lower, so discarded per v3 protocol (keep iff strictly lower). Checkpoint: bla_gpt/logs/ar_full_F79_0/state_step005100.pt. Note: both GOAT components now tested -- sink prior kept (F74/F74c), relative spectral prior discarded at this scale/horizon.
 - Notion: mark Better Attention Priors [x] IMPLEMENTED (F74 sink component + F79 relative component).
 
 
