@@ -126,6 +126,8 @@ class GPTConfig(Coqpit):
     use_composable_gated_attn: bool = False  # Composable Gated Attention (arXiv:2505.06708) on top of GOAT sink
     attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
     use_value_residual: bool = False  # Value Residual Learning (arXiv:2410.17897): learnable-plus mix of first-layer V into deeper layers
+    use_affine_scaled_attn: bool = False  # Affine-Scaled Attention (arXiv:2602.23057): [alpha*softmax + beta] @ V with EMA-tracked beta
+    affine_attn_momentum: float = 0.95  # EMA momentum rho for alpha_ma in affine-scaled attention
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -310,6 +312,9 @@ def get_attention(config, depth=None):
     if attn_type == "regular":
         return Attention(config)
     elif attn_type == "xsa":
+        if getattr(config, "use_affine_scaled_attn", False):
+            from attentions import AffineScaledAttention
+            return AffineScaledAttention(config)
         if getattr(config, "use_composable_gated_attn", False):
             return ComposableGatedAttention(config)
         if getattr(config, "use_goat_sink_prior", False):
@@ -763,7 +768,11 @@ class GPT(nn.Module):
         self._init_value_residual()
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
-            if pn.endswith("c_proj.weight"):
+            if pn.endswith("alpha_proj.weight"):
+                # Affine-Scaled Attention (F81): zero-init (alpha=0.5) must
+                # survive the global _init_weights pass, per arXiv:2602.23057.
+                torch.nn.init.zeros_(p)
+            elif pn.endswith("c_proj.weight"):
                 if self.zero_init_proj_layers:
                     torch.nn.init.zeros_(p)
                 else:

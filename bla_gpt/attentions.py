@@ -1254,6 +1254,58 @@ def diff_attn_v2_func(attn1: torch.Tensor, attn2: torch.Tensor, lambda_val: torc
     return attn1 - torch.sigmoid(lambda_val).unsqueeze(-1) * attn2
 
 
+class AffineScaledAttention(GOATSinkAttention):
+    """XSA + GOAT sink prior + Affine-Scaled Attention (arXiv:2602.23057).
+
+    Bae et al., ICML 2026, Eqs. 6-9: output = [alpha(X) * softmax(logits) + beta(X)] @ V.
+    alpha = sigmoid(W_alpha x) per head/query (zero-init => 0.5); beta =
+    (alpha_ma - alpha) / N with alpha_ma an EMA of alpha (momentum rho).
+    beta is applied only over causally valid keys (no future leakage).
+    Manual attention path (needs post-softmax weights); GOAT sink prior is
+    added to the logits before softmax, mirroring GOATSinkAttention.
+
+    Config gates: use_affine_scaled_attn (bool, default False),
+    affine_attn_momentum (float, default 0.95).
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.alpha_proj = nn.Linear(config.n_embd, self.n_head, bias=False)
+        nn.init.zeros_(self.alpha_proj.weight)  # alpha = sigmoid(0) = 0.5 at init
+        self.affine_momentum = getattr(config, "affine_attn_momentum", 0.95)
+        self.register_buffer("alpha_ma", torch.full((self.n_head,), 0.5))
+        self._x_input = None
+
+    def forward(self, x, q=None, mask=None):
+        self._x_input = x
+        return super().forward(x, q, mask)
+
+    def _flash_attention(self, q, k, v):
+        # Affine scaling modifies post-softmax weights: manual path required.
+        B, H, T_q, D = q.shape
+        T = k.size(2)
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(D))
+        causal = torch.triu(torch.ones(T_q, T, dtype=torch.bool, device=q.device), diagonal=1)
+        att = att.masked_fill(causal[None, None], float("-inf"))
+        att = torch.cat([att[:, :, :, :1] + self.sink_prior[None, :, None, None], att[:, :, :, 1:]], dim=-1)
+        w = F.softmax(att, dim=-1)
+        w = self.attn_dropout(w)
+
+        alpha = torch.sigmoid(self.alpha_proj(self._x_input))  # (B, T, H)
+        alpha = alpha.transpose(1, 2).unsqueeze(-1)  # (B, H, T, 1)
+        if self.training:
+            with torch.no_grad():
+                batch_mean = alpha.detach().mean(dim=(0, 2)).squeeze(-1)  # (H,)
+                self.alpha_ma.mul_(self.affine_momentum).add_(
+                    batch_mean * (1.0 - self.affine_momentum)
+                )
+        beta = (self.alpha_ma.view(1, H, 1, 1) - alpha) / T
+        valid = (~causal).to(w.dtype)[None, None]  # (1, 1, T_q, T)
+        w = alpha * w + beta * valid
+        y = w @ v
+        return self._apply_exclusion(y, v)
+
+
 class MultiheadDiffAttnv2(Attention):
     """
     Differential Attention v2 (Microsoft, Jan 2025)
