@@ -294,3 +294,10 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Class: ARCH (information-flow mechanism, transferable).
 - F85 config = launch-time best config + use_value_residual=true.
 - Tests: tests/test_value_residual_f85.py — 6/6 pass (params created/absent by gate, output changes, grads to all λ params and through V_1 to layer-0 kv_proj, repeat-forward consistency, variable seq len). Full suite failure set identical before/after patch (pre-existing env failures only; 145 pass). Note: zero_init_proj_layers=True masks the mechanism at init (c_proj=0) — tests disable it.
+
+## F81 reimplementation note (2026-07-13)
+- Original F81 AffineScaledAttention code was lost to the pod eviction (audit above survived; class absent from attentions.py, no ledger row). Reimplemented per the audit spec.
+- Implementation: `AffineScaledAttention(GOATSinkAttention)` in attentions.py; config gates `use_affine_scaled_attn` (default False), `affine_attn_momentum` (0.95). Dispatched first in the xsa branch of get_attention (before composable). Manual attention path with GOAT sink prior added to logits pre-softmax.
+- Two deviations/decisions documented: (1) beta is applied only over causally valid keys (beta*causal_mask) — applying it uniformly would leak future V into past positions; causality test enforces this. (2) alpha_proj zero-init is re-applied after GPT's global _init_weights pass (repo's post-apply re-init block), since apply(_init_weights) overwrites class-level init; note ComposableGatedAttention's gate_proj zero-init is silently overwritten the same way — left untouched to preserve comparability with recorded F84/F82F84 runs.
+- Tests: tests/test_affine_scaled_f81.py — 6/6 pass (dispatch/modules, gate-off unchanged, output changes, grads + EMA finite, EMA frozen in eval, causality). F85 tests still 6/6 after patch.
+- F81 config = launch-time best config + use_affine_scaled_attn=true.
