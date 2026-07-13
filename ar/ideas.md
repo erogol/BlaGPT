@@ -285,3 +285,12 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Class: ARCH (attention mechanism, composable with existing stack).
 - F84 config = best_config + use_composable_gated_attn=true.
 - Tests: forward+backward verified, gate_proj present, sink_prior inherited, regression OK.
+
+## F85 audit — Composable Value Residual Learning (arXiv:2410.17897, Zhou et al., 2024)
+- Paper: "Value Residual Learning For Alleviating Attention Concentration In Transformers" — mix first-layer V into every deeper layer's V: V'_l = λ1_l·V_1 + λ2_l·V_l. Learnable-plus variant: λ1 = softmax(per-layer logits)·scale (scale init = n_layer, deeper layers learn to pull more V_1), λ2 per-layer learnable init 0.5.
+- Prior state: repo has standalone ResFormer (resformer.py) replacing the whole model class; original composable F85 (commit 8b1df27) was lost to pod eviction. This is a reimplementation.
+- Repo adaptation: config gate `use_value_residual` (bool, default False). Hook in base `Attention._project_kv` (`_apply_value_residual`) — covers the XSA→GOAT→Composable MRO chain, which inherits base `_project_kv`. GPT-level params `v_res_logits` (n_layer-1), `v_res_scale` (init n_layer), `v_res_lambda2` (init 0.5); per-forward λ computed in GPT.forward, threaded via shared holder dict attached to each attn (`v_res_holder`/`v_res_depth`).
+- Deviation from repo's standalone ResFormer: V_1 kept in autograd graph (paper-faithful); standalone detaches it.
+- Class: ARCH (information-flow mechanism, transferable).
+- F85 config = launch-time best config + use_value_residual=true.
+- Tests: tests/test_value_residual_f85.py — 6/6 pass (params created/absent by gate, output changes, grads to all λ params and through V_1 to layer-0 kv_proj, repeat-forward consistency, variable seq len). Full suite failure set identical before/after patch (pre-existing env failures only; 145 pass). Note: zero_init_proj_layers=True masks the mechanism at init (c_proj=0) — tests disable it.
