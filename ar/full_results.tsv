@@ -13,3 +13,4 @@ F82	9f83128	F77	3.2224	keep_pending_confirmation	hybrid_norm	bla_gpt/logs/ar_ful
 F82F84	fffafc9	F82	3.2128	keep	hybrid_norm_composable_gated_attn	bla_gpt/logs/ar_full_F82F84_0/state_step005100.pt	Full 5100-step run; -0.0096 vs best F82=3.2224; clean keep, no confirmation required because improvement >=0.003
 F85	2503f97	F82F84	3.2011	keep	value_residual_learnable_plus	bla_gpt/logs/ar_full_F85_0/state_step005100.pt	Full 5100-step run; -0.0117 vs best F82F84=3.2128; clean keep, no confirmation required because improvement >=0.003
 F86	f369535	F85	3.2042	discard	affine_scaled_attention	bla_gpt/logs/ar_full_F86_0/state_step005100.pt	Full 5100-step run; +0.0031 vs best F85=3.2011; no confirmation because not lower
+F87	2bcd358	F85	3.1979	keep	unet_long_skips	bla_gpt/logs/ar_full_F87_0/state_step005100.pt	Full 5100-step run; -0.0032 vs best F85=3.2011; clean keep, no confirmation required because improvement >=0.003
