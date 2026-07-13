@@ -89,5 +89,6 @@
   "use_gated_norm": true,
   "gated_norm_rank": 16,
   "use_hybrid_norm": true,
-  "use_composable_gated_attn": true
+  "use_composable_gated_attn": true,
+  "use_value_residual": true
 }
