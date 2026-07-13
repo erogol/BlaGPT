@@ -234,7 +234,25 @@ class Attention(nn.Module):
 
     def _project_kv(self, x, B, T):
         kv = self.kv_proj(x).view(B, T, 2, self.n_kv_head, self.head_dim)
-        return kv.unbind(dim=2)
+        k, v = kv.unbind(dim=2)
+        v = self._apply_value_residual(v)
+        return k, v
+
+    def _apply_value_residual(self, v):
+        # Value Residual Learning (arXiv:2410.17897, learnable-plus), composable
+        # via config gate `use_value_residual`. Holder/depth attached by
+        # GPT._init_value_residual; absent => no-op.
+        holder = getattr(self, "v_res_holder", None)
+        if holder is None:
+            return v
+        if self.v_res_depth == 0:
+            holder["v1"] = v
+            return v
+        v1 = holder.get("v1")
+        if v1 is None:
+            return v
+        i = self.v_res_depth - 1
+        return holder["lam1"][i] * v1 + holder["lam2"][i] * v
 
     def _apply_norm(self, q, k):
         q = self.q_norm(q)

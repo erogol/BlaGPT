@@ -125,6 +125,7 @@ class GPTConfig(Coqpit):
     use_hybrid_norm: bool = False  # HybridNorm (arXiv:2503.04598): QKV-norm in attention + Post-Norm in FFN
     use_composable_gated_attn: bool = False  # Composable Gated Attention (arXiv:2505.06708) on top of GOAT sink
     attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
+    use_value_residual: bool = False  # Value Residual Learning (arXiv:2410.17897): learnable-plus mix of first-layer V into deeper layers
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -759,6 +760,7 @@ class GPT(nn.Module):
         # init all weights
         self.apply(self._init_weights)
         self._init_attn_res()
+        self._init_value_residual()
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith("c_proj.weight"):
@@ -843,6 +845,22 @@ class GPT(nn.Module):
         if getattr(self.config, "use_attn_res", False):
             self.attn_res_w = nn.Parameter(torch.zeros(self.config.n_layer + 1, self.config.n_embd))
 
+    def _init_value_residual(self):
+        # Value Residual Learning (arXiv:2410.17897), learnable-plus variant:
+        # lambda1 = softmax(per-layer logits) * scale (scale init = n_layer),
+        # lambda2 = per-layer learnable, init 0.5. V1 kept in autograd graph
+        # (paper-faithful; repo's standalone ResFormer detaches it).
+        if not getattr(self.config, "use_value_residual", False):
+            return
+        n = self.config.n_layer
+        self.v_res_logits = nn.Parameter(torch.randn(n - 1) * 0.1)
+        self.v_res_scale = nn.Parameter(torch.tensor(float(n)))
+        self.v_res_lambda2 = nn.Parameter(torch.full((n - 1,), 0.5))
+        self._v_res_holder = {}
+        for i, block in enumerate(self.transformer.h):
+            block.attn.v_res_holder = self._v_res_holder
+            block.attn.v_res_depth = i
+
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
@@ -873,6 +891,10 @@ class GPT(nn.Module):
 
         _attn_res = getattr(self.config, "use_attn_res", False) and not self.config.use_hyper_connections
         _ar_bs = getattr(self.config, "attn_res_block_size", 0)
+        if getattr(self.config, "use_value_residual", False):
+            self._v_res_holder["v1"] = None
+            self._v_res_holder["lam1"] = F.softmax(self.v_res_logits, dim=0) * self.v_res_scale
+            self._v_res_holder["lam2"] = self.v_res_lambda2
         if _attn_res:
             if _ar_bs > 0:
                 _ar_blocks = []       # completed block sums
