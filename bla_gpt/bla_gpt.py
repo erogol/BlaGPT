@@ -128,6 +128,8 @@ class GPTConfig(Coqpit):
     use_value_residual: bool = False  # Value Residual Learning (arXiv:2410.17897): learnable-plus mix of first-layer V into deeper layers
     use_affine_scaled_attn: bool = False  # Affine-Scaled Attention (arXiv:2602.23057): [alpha*softmax + beta] @ V with EMA-tracked beta
     affine_attn_momentum: float = 0.95  # EMA momentum rho for alpha_ma in affine-scaled attention
+    use_unet_skips: bool = False  # U-net long skips (F87, modded-nanogpt lineage): decoder layer i adds w_i * encoder(n-1-i) output
+    unet_skip_init: float = 0.25  # init for U-net skip scalars (chain-20 best: 0.25)
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -762,6 +764,10 @@ class GPT(nn.Module):
                 vocab_mult=config.engram_vocab_mult,
             )
 
+        # U-net long skips (F87): one learnable scalar per encoder/decoder pair
+        if getattr(config, "use_unet_skips", False):
+            self.skip_weights = nn.Parameter(torch.full((config.n_layer // 2,), float(config.unet_skip_init)))
+
         # init all weights
         self.apply(self._init_weights)
         self._init_attn_res()
@@ -911,6 +917,9 @@ class GPT(nn.Module):
                 _ar_vs = None
             else:
                 _ar_vs = [x]  # v0 = embedding output
+        # U-net long skips (F87)
+        _unet_skips = [] if getattr(self.config, "use_unet_skips", False) else None
+        _n_layers = len(self.transformer.h)
         for layer_idx, block in enumerate(self.transformer.h):
             if _attn_res:
                 _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
@@ -920,6 +929,8 @@ class GPT(nn.Module):
                 x = _srcs[0] * _alpha[0].unsqueeze(-1)
                 for _i in range(1, len(_srcs)):
                     x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
+            if _unet_skips is not None and layer_idx >= _n_layers // 2:
+                x = x + self.skip_weights[layer_idx - _n_layers // 2] * _unet_skips[_n_layers - 1 - layer_idx]
             # Apply engram based on variant
             if self.engram is not None:
                 if self.config.use_hyper_connections:
@@ -945,6 +956,8 @@ class GPT(nn.Module):
                     _ar_vs.append(x - _h_in)
             else:
                 x = block(x, token_ids=idx)
+            if _unet_skips is not None and layer_idx < _n_layers // 2:
+                _unet_skips.append(x)
 
         if _attn_res:
             _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
