@@ -1,0 +1,6 @@
+started_utc=2026-07-12T21:44:00Z
+git_commit=9f83128
+run_name=ar_full_F82
+config=ar/full_runs/F82/config.json
+exit_code=0
+checkpoint_dir=/nvme/BlaGPT/bla_gpt/logs/ar_full_F82_0
