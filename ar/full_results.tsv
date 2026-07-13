@@ -10,3 +10,4 @@ F78	bef34ef	F77	3.2299	discard	pope_positional_embedding	bla_gpt/logs/ar_full_F7
 F79	ff3e595	F77	3.2257	discard	goat_relative_spectral_prior	bla_gpt/logs/ar_full_F79_0/state_step005100.pt	Full 5100-step run; +0.0027 vs best F77=3.223; no confirmation because not lower
 F80	30dfa0e	F77	3.2785	discard	nag_residual	bla_gpt/logs/ar_full_F80_0/state_step005100.pt	Full 5100-step run; +0.0555 vs best F77=3.223; no confirmation because not lower
 F82	9f83128	F77	3.2224	keep_pending_confirmation	hybrid_norm	bla_gpt/logs/ar_full_F82_0/state_step005100.pt	Full 5100-step run; -0.0006 vs best F77=3.223; improvement <0.003, requires one full confirmation from random init
+F82F84	fffafc9	F82	3.2128	keep	hybrid_norm_composable_gated_attn	bla_gpt/logs/ar_full_F82F84_0/state_step005100.pt	Full 5100-step run; -0.0096 vs best F82=3.2224; clean keep, no confirmation required because improvement >=0.003
