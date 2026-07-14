@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import sys
 
@@ -177,6 +178,15 @@ class Hyperparameters(Coqpit):
     save_best_model: bool = True  # whether to save best model based on val loss
 
 
+def _apply_json_overrides(args: "Hyperparameters", config_path: str) -> None:
+    """Apply Hyperparameters-matching keys from a JSON config file to args."""
+    with open(config_path) as f:
+        overrides = json.load(f)
+    for key, value in overrides.items():
+        if hasattr(args, key):
+            setattr(args, key, value)
+
+
 # -----------------------------------------------------------------------------
 # int main
 
@@ -192,17 +202,17 @@ if __name__ == "__main__":
     args = Hyperparameters()
     model_config, model = get_model(cli_args.model_name)
 
-    if cli_args.config:
-        model_config.load_json(cli_args.config)
-
-    # Apply model-config values to matching training hyperparameters after
-    # loading overrides (e.g. warmup_iters in a full-training recipe).
+    # Override Hyperparameters with matching model_config attributes
     for key, value in model_config.to_dict().items():
         if hasattr(args, key):
             setattr(args, key, value)
 
     if cli_args.run_name:
         args.run_name = cli_args.run_name
+
+    if cli_args.config:
+        model_config.load_json(cli_args.config)
+        _apply_json_overrides(args, cli_args.config)
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
