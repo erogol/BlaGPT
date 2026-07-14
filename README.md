@@ -75,6 +75,8 @@ Differential Attention v2 - [paper](https://spiky-homegrown-4cb.notion.site/Diff
 Hyper-Connections - [paper](https://arxiv.org/abs/2409.19606) | [explanation](./techniques/hyper_connections.md) - best_model_loss: `3.2327` -> loss: `3.2741` - train_loss: `3.2388` - peak memory: `68729 MiB` - step_avg: `928.26ms` - did not beat the old best
 
 
+### AutoResearch keeps
+
 GOAT Sink Prior - [paper](https://arxiv.org/abs/2601.15380) | [explanation](./techniques/goat_sink_prior.md) - best_model_loss: `3.2354` -> new_best_model_loss: `3.2298` - peak memory: `52231 MiB` - step_avg: `377.61ms`
 
 GatedNorm - [paper](https://arxiv.org/abs/2601.22966) | [explanation](./techniques/gated_norm.md) - best_model_loss: `3.2298` -> new_best_model_loss: `3.2230` - peak memory: `50023 MiB` - step_avg: `410.68ms`
