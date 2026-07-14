@@ -89,9 +89,7 @@ Composable Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explan
 
 Composable Value Residual - [paper](https://arxiv.org/abs/2410.17897) | [explanation](./techniques/value_residual.md) - best_model_loss: `3.2128` -> new_best_model_loss: `3.2011` - peak memory: `58988 MiB` - step_avg: `497.55ms`
 
-U-net Long Skips - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1979` - peak memory: `58632 MiB` - step_avg: `494.31ms`
-
-👑 Aggregate Winning Stack - [checkpoint](s3://tts-team-dev/checkpoints/blagpt/autoresearch/jul8/F87c/state_step005100.pt) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1961` - peak memory: `58632 MiB` - step_avg: `494.02ms`
+👑 U-net Long Skips / Aggregate Winning Stack - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) | [checkpoint](s3://tts-team-dev/checkpoints/blagpt/autoresearch/jul8/F87c/state_step005100.pt) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1979`; confirmation rerun: `3.1961` - peak memory: `58632 MiB` - step_avg: `494.02ms`
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
