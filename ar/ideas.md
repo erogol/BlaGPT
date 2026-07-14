@@ -313,3 +313,5 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Placement with AttnRes active: skip is added AFTER the per-layer AttnRes source-mix, before engram/block — so it perturbs block inputs; the final AttnRes mix is over per-block deltas, meaning the skip influences output only through changed block responses. At exact init (zero_init_proj_layers=True) blocks are identity -> skip provably inert at step 0 (zero grad); becomes active once projections move. Verified experimentally during test debugging.
 - Tests: tests/test_unet_skips_f87.py — 5/5 (gate-off identity + no param, param shape/init, output changes with gate on, finite grads incl. skip_weights, zero-weights == gate-off). F81+F85 suites still green (17/17 total).
 - F87 config = launch-time best config + use_unet_skips=true (init 0.25 default).
+
+- F87 promotion (2026-07-14): promoted U-net long skips to ar/best_config.json as canonical best after clean keep: val_loss 3.1979 vs F85=3.2011 (-0.0032). Retained F87 checkpoint; deleted superseded F85 and discard F86 checkpoint dirs. Commit d89e68d records the run ledger/result.
