@@ -130,6 +130,7 @@ class GPTConfig(Coqpit):
     affine_attn_momentum: float = 0.95  # EMA momentum rho for alpha_ma in affine-scaled attention
     use_unet_skips: bool = False  # U-net long skips (F87, modded-nanogpt lineage): decoder layer i adds w_i * encoder(n-1-i) output
     unet_skip_init: float = 0.25  # init for U-net skip scalars (chain-20 best: 0.25)
+    use_oasis_depth_softmax1: bool = False  # OASIS depth-Softmax1 null route for AttnResidual (arXiv:2605.17887), default off
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -860,6 +861,17 @@ class GPT(nn.Module):
         if getattr(self.config, "use_attn_res", False):
             self.attn_res_w = nn.Parameter(torch.zeros(self.config.n_layer + 1, self.config.n_embd))
 
+    def _attn_res_route(self, scores):
+        # OASIS depth-Softmax1 (Luo et al., 2026; arXiv:2605.17887):
+        # add an explicit zero-vector null branch to AttnResidual depth routing.
+        # Gate-off is the original depth softmax exactly.
+        if not getattr(self.config, "use_oasis_depth_softmax1", False):
+            return scores.softmax(dim=0)
+        m = scores.max(dim=0, keepdim=True).values
+        weights = torch.exp(scores - m)
+        null_weight = torch.exp(-m)
+        return weights / (null_weight + weights.sum(dim=0, keepdim=True))
+
     def _init_value_residual(self):
         # Value Residual Learning (arXiv:2410.17897), learnable-plus variant:
         # lambda1 = softmax(per-layer logits) * scale (scale init = n_layer),
@@ -925,7 +937,7 @@ class GPT(nn.Module):
                 _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
                 _w = self.attn_res_w[layer_idx]
                 _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)  # (L, b, t)
-                _alpha = _scores.softmax(dim=0)
+                _alpha = self._attn_res_route(_scores)
                 x = _srcs[0] * _alpha[0].unsqueeze(-1)
                 for _i in range(1, len(_srcs)):
                     x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
@@ -963,7 +975,7 @@ class GPT(nn.Module):
             _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
             _w = self.attn_res_w[self.config.n_layer]
             _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)
-            _alpha = _scores.softmax(dim=0)
+            _alpha = self._attn_res_route(_scores)
             x = _srcs[0] * _alpha[0].unsqueeze(-1)
             for _i in range(1, len(_srcs)):
                 x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)

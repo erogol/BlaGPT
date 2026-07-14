@@ -315,3 +315,10 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - F87 config = launch-time best config + use_unet_skips=true (init 0.25 default).
 
 - F87 promotion (2026-07-14): promoted U-net long skips to ar/best_config.json as canonical best after clean keep: val_loss 3.1979 vs F85=3.2011 (-0.0032). Retained F87 checkpoint; deleted superseded F85 and discard F86 checkpoint dirs. Commit d89e68d records the run ledger/result.
+
+## F88 audit — OASIS depth-Softmax1 for AttnResidual (2026-07-14)
+- Paper read: "Attention Sinks and Outliers in Attention Residuals" (Haozheng Luo, Haoran Dai, Shaoyang Zhang, Xi Chen, Hanchen Jiang, Yijiang Li, Jingyuan Huang, Chenghao Qiu, Chenwei Xu, Zhenyu Pan, Haotian Zhang, Binghui Wang, Yan Chen; arXiv:2605.17887, 2026). The paper argues AttnResidual's dual token/depth normalization worsens sink/outlier routing; OASIS adds Softmax1 null mass at token and depth levels, plus token-null-to-depth coupling.
+- Repo-native mechanism selected: depth-level Softmax1 only. It is the smallest safe slice because BlaGPT already uses AttnResidual depth routing (`use_attn_res`) but does not expose token attention null statistics from all active attention classes. Depth Softmax1 adds an explicit zero-vector null branch, reducing total real-source mass when routing logits are weak; no new parameters, default off.
+- Implementation: `GPTConfig.use_oasis_depth_softmax1` default false and `GPT._attn_res_route(scores)` replacing both AttnResidual `.softmax(dim=0)` sites. Gate-off is exact original softmax; gate-on uses stable `exp(scores-m)/(exp(-m)+sum(exp(scores-m)))`.
+- Tests: `tests/test_oasis_depth_f88.py` covers gate-off identity/no params, Softmax1 mass (zero scores over 3 sources => 0.25 each, 0.75 real mass), output changes, finite grads, and gate-off route equals plain softmax. Also reran F87 U-net and F85 value-residual suites: 16/16 passed.
+- Launch status: queued behind active F87c confirmation run; do not launch F88 until F87c finishes and records its final-only validation.
