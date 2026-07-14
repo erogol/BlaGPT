@@ -93,6 +93,8 @@ Composable Value Residual - [paper](https://arxiv.org/abs/2410.17897) | [explana
 
 Learning-rate ×1.4 sweep (F90) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1961` -> loss: `3.2014` - peak memory: `58632 MiB` - step_avg: `492.86ms` - did not beat; INVALID/NO-OP because the intended `learning_rate=0.0014` was not applied (logged peak lr `0.001`).
 
+Learning-rate ×1.4 validated (F90r) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1972` - peak memory: `58632 MiB` - step_avg: `491.05ms` - tiny +0.0007 gain, keep_new_best_pending_confirmation (needs repeat before crown/best_config update).
+
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
 
