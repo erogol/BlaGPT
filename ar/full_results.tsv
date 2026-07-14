@@ -15,3 +15,4 @@ F85	2503f97	F82F84	3.2011	keep	value_residual_learnable_plus	bla_gpt/logs/ar_ful
 F86	f369535	F85	3.2042	discard	affine_scaled_attention	bla_gpt/logs/ar_full_F86_0/state_step005100.pt	Full 5100-step run; +0.0031 vs best F85=3.2011; no confirmation because not lower
 F87	2bcd358	F85	3.1979	keep	unet_long_skips	bla_gpt/logs/ar_full_F87_0/state_step005100.pt	Full 5100-step run; -0.0032 vs best F85=3.2011; clean keep, no confirmation required because improvement >=0.003
 F87c	dcc103d	F87	3.1961	keep_pending_confirmation	aggregate_all_winning_changes_confirmation	bla_gpt/logs/ar_full_F87c_0/state_step005100.pt	Full 5100-step run; -0.0018 vs best F87=3.1979; improvement <0.003, requires one full confirmation from random init
+F88	b32104a	F87c	nan	failed_nan	oasis_depth_softmax1	bla_gpt/logs/ar_full_F88_0/best_model_3375.pt	Run stopped after persistent NaNs: first train_loss:nan at step 3489; last finite eval step 3375 val_loss 3.3480; no best_config update
