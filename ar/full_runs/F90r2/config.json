@@ -25,7 +25,6 @@
   "kda_interleave_ratio": 4,
   "kda_interleave_with": "regular",
   "kda_use_short_conv": true,
-  "learning_rate": 0.0014,
   "mlp_expand": 10,
   "n_embd": 768,
   "n_head": 12,
@@ -93,5 +92,6 @@
   "weight_sharing_groups": 1,
   "weight_sharing_pattern": [],
   "z_loss_weight": 0.0,
-  "zero_init_proj_layers": true
+  "zero_init_proj_layers": true,
+  "learning_rate": 0.0014
 }
