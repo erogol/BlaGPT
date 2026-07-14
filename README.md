@@ -89,11 +89,11 @@ Composable Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explan
 
 Composable Value Residual - [paper](https://arxiv.org/abs/2410.17897) | [explanation](./techniques/value_residual.md) - best_model_loss: `3.2128` -> new_best_model_loss: `3.2011` - peak memory: `58988 MiB` - step_avg: `497.55ms`
 
-👑 U-net Long Skips - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) | [checkpoint](s3://tts-team-dev/checkpoints/blagpt/autoresearch/jul8/F87c/state_step005100.pt) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1961` - peak memory: `58632 MiB` - step_avg: `494.02ms`
+U-net Long Skips - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1979` - peak memory: `58632 MiB` - step_avg: `494.31ms`
 
-Learning-rate ×1.4 sweep (F90) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1961` -> loss: `3.2014` - peak memory: `58632 MiB` - step_avg: `492.86ms` - did not beat; INVALID/NO-OP because the intended `learning_rate=0.0014` was not applied (logged peak lr `0.001`).
+Learning-rate ×1.4 sweep (F90) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> loss: `3.2014` - peak memory: `58632 MiB` - step_avg: `492.86ms` - did not beat; INVALID/NO-OP because the intended `learning_rate=0.0014` was not applied (logged peak lr `0.001`).
 
-Learning-rate ×1.4 validated (F90r) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1972` - peak memory: `58632 MiB` - step_avg: `491.05ms` - tiny +0.0007 gain, keep_new_best_pending_confirmation (needs repeat before crown/best_config update).
+👑 Learning-rate ×1.4 validated and confirmed (F90r/F90r2) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1965` - first run: `3.1972`; independent confirmation: `3.1965` - peak memory: `58632 MiB` - step_avg: `491.00ms` - confirmed keep; active best config uses `learning_rate=0.0014`.
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
@@ -283,17 +283,17 @@ Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
 
 ## Autoresearch checkpoint archive
 
-Latest archived full-run checkpoint:
+Latest archived architecture-best checkpoint:
 
-- **Run:** F87c aggregate confirmation
-- **Validation loss:** `3.1961` at step `5100`
+- **Run:** F87c aggregate confirmation (unconfirmed seed-low; F87 architecture result remains `3.1979`)
+- **Validation loss:** `3.1961` at step `5100` (F87c2 confirmation: `3.1987`)
 - **Local checkpoint:** `bla_gpt/logs/ar_full_F87c_0/state_step005100.pt`
 - **S3 checkpoint:** `s3://tts-team-dev/checkpoints/blagpt/autoresearch/jul8/F87c/state_step005100.pt`
 - **Size:** `3,039,250,572` bytes
 - **S3 ETag:** `f44e2f6445ea8929cbe3addf349bb16c-363`
 - **Uploaded:** `2026-07-14 08:12:27 UTC`
 
-The current autoresearch ledger is `ar/full_results.tsv`; the active best config is `ar/best_config.json`.
+The current autoresearch ledger is `ar/full_results.tsv`; the active best config is `ar/best_config.json`. The confirmed best result is F90r/F90r2 with learning rate `0.0014` (`3.1972` / `3.1965`).
 
 ## Best Model So Far
 
