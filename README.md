@@ -75,23 +75,19 @@ Differential Attention v2 - [paper](https://spiky-homegrown-4cb.notion.site/Diff
 Hyper-Connections - [paper](https://arxiv.org/abs/2409.19606) | [explanation](./techniques/hyper_connections.md) - best_model_loss: `3.2327` -> loss: `3.2741` - train_loss: `3.2388` - peak memory: `68729 MiB` - step_avg: `928.26ms` - did not beat the old best
 
 
-## Autoresearch Full-Run Keeps
+GOAT Sink Prior - [paper](https://arxiv.org/abs/2601.15380) | [explanation](./techniques/goat_sink_prior.md) - best_model_loss: `3.2354` -> new_best_model_loss: `3.2298` - peak memory: `52231 MiB` - step_avg: `377.61ms`
 
-These are the recent greedy full-run improvements. Each row adds one new change on top of the previous best and uses the normal 5100-step training run.
+GatedNorm - [paper](https://arxiv.org/abs/2601.22966) | [explanation](./techniques/gated_norm.md) - best_model_loss: `3.2298` -> new_best_model_loss: `3.2230` - peak memory: `50023 MiB` - step_avg: `410.68ms`
 
-GOAT Sink Prior - [paper](https://arxiv.org/abs/2601.15380) | [explanation](./techniques/goat_sink_prior.md) - baseline_loss: `3.2354` -> confirmed_loss: `3.2298` - runs: `F74` / `F74c` - one learned key-0 sink prior per head
+HybridNorm - [paper](https://arxiv.org/abs/2503.04598) | [explanation](./techniques/hybrid_norm.md) - best_model_loss: `3.2230` -> new_best_model_loss: `3.2224` - peak memory: `50495 MiB` - step_avg: `474.82ms`
 
-GatedNorm - [paper](https://arxiv.org/abs/2601.22966) | [explanation](./techniques/gated_norm.md) - best_model_loss: `3.2298` -> new_best_model_loss: `3.2230` - run: `F77` - low-rank gate after RMSNorm
+Composable Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./techniques/composable_gated_attention.md) - best_model_loss: `3.2224` -> new_best_model_loss: `3.2128` - peak memory: `58553 MiB` - step_avg: `489.07ms`
 
-HybridNorm - [paper](https://arxiv.org/abs/2503.04598) | [explanation](./techniques/hybrid_norm.md) - best_model_loss: `3.2230` -> loss: `3.2224` - run: `F82` - small gain, kept pending confirmation because improvement `<0.003`
+Composable Value Residual - [paper](https://arxiv.org/abs/2410.17897) | [explanation](./techniques/value_residual.md) - best_model_loss: `3.2128` -> new_best_model_loss: `3.2011` - peak memory: `58988 MiB` - step_avg: `497.55ms`
 
-Composable Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./techniques/composable_gated_attention.md) - best_model_loss: `3.2224` -> new_best_model_loss: `3.2128` - run: `F82F84` - gated attention composed on top of XSA + GOAT
+U-net Long Skips - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1979` - peak memory: `58632 MiB` - step_avg: `494.31ms`
 
-Composable Value Residual - [paper](https://arxiv.org/abs/2410.17897) | [explanation](./techniques/value_residual.md) - best_model_loss: `3.2128` -> new_best_model_loss: `3.2011` - run: `F85` - ResFormer-style value residual inside the normal attention path
-
-U-net Long Skips - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1979` - run: `F87` - mirrored early-to-late layer skips with scalar gates
-
-Aggregate Winning Stack - [checkpoint](s3://tts-team-dev/checkpoints/blagpt/autoresearch/jul8/F87c/state_step005100.pt) - best_model_loss: `3.1979` -> loss: `3.1961` - run: `F87c` - all current winning changes together, pending confirmation because improvement `<0.003`
+Aggregate Winning Stack - [checkpoint](s3://tts-team-dev/checkpoints/blagpt/autoresearch/jul8/F87c/state_step005100.pt) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1961` - peak memory: `58632 MiB` - step_avg: `494.02ms`
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
