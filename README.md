@@ -91,6 +91,8 @@ Composable Value Residual - [paper](https://arxiv.org/abs/2410.17897) | [explana
 
 👑 U-net Long Skips - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) | [checkpoint](s3://tts-team-dev/checkpoints/blagpt/autoresearch/jul8/F87c/state_step005100.pt) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1961` - peak memory: `58632 MiB` - step_avg: `494.02ms`
 
+Learning-rate ×1.4 sweep (F90) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1961` -> loss: `3.2014` - peak memory: `58632 MiB` - step_avg: `492.86ms` - did not beat; INVALID/NO-OP because the intended `learning_rate=0.0014` was not applied (logged peak lr `0.001`).
+
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
 

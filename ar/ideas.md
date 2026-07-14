@@ -329,3 +329,16 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Tests: `tests/test_block_attn_res_f89.py` covers no-new-params, output changes vs full AttnRes, block-level route source counts, finite grads, and `attn_res_block_size=0` full-AttnRes source counts.
 - Implementation status (2026-07-14): config prepared and targeted tests passed: `tests/test_block_attn_res_f89.py` + F87 U-net + F85 value-residual suites = 16/16.
 - Full-run result (2026-07-14): DISCARD. Final val_loss 3.2024 vs best F87c=3.1961 (+0.0063). Run was fully stable (no NaN) — notably it cleared step 3489 where F88 NaN-ed on the identical base stack, isolating the F88 NaN to the OASIS depth-Softmax1 route. Block-level routing (bs=2) loses depth-selection granularity vs full per-layer AttnRes and does not pay for itself at this scale; the paper motivates Block AttnRes as a memory/communication optimization for large pipeline-parallel models, which does not bind here.
+
+## F87c2 postmortem — confirmation run of F87c aggregate (2026-07-14)
+- Full-run result: val_loss 3.1987, step_avg 493.19ms, 5100 steps, fresh random init.
+- Verdict: DID NOT CONFIRM. F87c2 (3.1987) > F87 baseline (3.1979) > F87c (3.1961). The F87c improvement of 0.0018 over F87 was within seed variance, not a real technique gain.
+- F87c status: downgraded from keep_pending_confirmation to discard_unconfirmed.
+- F87 remains the current best at 3.1979. best_config unchanged.
+- Curve comparison: F87c2 tracked F87c identically at every eval point (step 1000: 3.9378 vs 3.9378, step 2000: 3.4894 vs 3.4890, step 3000: 3.3868 vs 3.3859) but the final 2000 steps diverged slightly higher, landing 0.0026 above F87c and 0.0008 above F87.
+
+## F90 postmortem — learning-rate ×1.4 plumbing audit (2026-07-14)
+- Full run: val_loss 3.2014, peak memory 58632 MiB, step_avg 492.86ms, 5100 steps.
+- Intended candidate: `learning_rate=0.0014` (1.4x the Muon default 0.001) on F87.
+- Verdict: INVALID/NO-OP. The config contained `learning_rate=0.0014`, but `train.py` logged a peak learning rate of only 0.001; the model-config loader drops this training-only key before it is copied into `Hyperparameters`. Do not treat F90 as evidence about the LR sweep.
+- Next action: add explicit, tested training-hyperparameter override plumbing or use a supported launch path, then rerun the LR candidate. F87 remains best at 3.1979.
