@@ -342,3 +342,9 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Intended candidate: `learning_rate=0.0014` (1.4x the Muon default 0.001) on F87.
 - Verdict: INVALID/NO-OP. The config contained `learning_rate=0.0014`, but `train.py` logged a peak learning rate of only 0.001; the model-config loader drops this training-only key before it is copied into `Hyperparameters`. Do not treat F90 as evidence about the LR sweep.
 - Next action: add explicit, tested training-hyperparameter override plumbing or use a supported launch path, then rerun the LR candidate. F87 remains best at 3.1979.
+
+## F90r postmortem — valid learning-rate ×1.4 (2026-07-14)
+- Full run: val_loss 3.1972, peak memory 58632 MiB, step_avg 491.05ms, 5100 steps.
+- Candidate: `learning_rate=0.0014` (1.4x default 0.001) on F87 after fixing JSON training-hyperparameter override plumbing in `train.py`.
+- Verdict: keep_new_best_pending_confirmation. It beats F87=3.1979 by 0.0007, but the margin is below the observed seed-noise band from F87c/F87c2; requires confirmation before becoming trusted best.
+- best_config not updated yet until confirmation. Next action: run F90r2 confirmation or continue queue depending backlog priority.
