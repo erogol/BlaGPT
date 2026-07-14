@@ -68,12 +68,30 @@ ResFormer (Plus) - [paper](https://arxiv.org/html/2410.17897v5) | [explanation](
 
 Engram (My Simple Variant) - [paper](https://github.com/deepseek-ai/Engram/blob/main/Engram_paper.pdf) | [explanation](./techniques/engram.md) - best_model_loss: `3.2327` -> new_best_model_loss: `3.2296` - peak memory: `50488 MiB` - step_avg: `504.09ms`
 
-Differential Attention v2 - [paper](https://spiky-homegrown-4cb.notion.site/Differential-Transformer-V2-2e7baa052def80ecaa93d4d67d125417) | [explanation](./techniques/diffattnv2.md) - best_model_loss: `3.2296` -> new_best_model_loss: `3.2274` - peak memory: `52829 MiB` - step_avg: `535.16`
+Differential Attention v2 - [paper](https://spiky-homegrown-4cb.notion.site/Differential-Transformer-V2-2e7baa052def80ecaa93d4d67d125417) | [explanation](./techniques/diff_attn_v2.md) - best_model_loss: `3.2296` -> new_best_model_loss: `3.2274` - peak memory: `52829 MiB` - step_avg: `535.16`
 
 👑 Exclusive Self Attention - [paper](https://arxiv.org/html/2603.09078v1) - best_model_loss: `3.2327` -> new_best_model_loss: `3.2303` - train_loss: `3.1987` - peak memory: `49859 MiB` - step_avg: `424.54ms`
 
 Hyper-Connections - [paper](https://arxiv.org/abs/2409.19606) | [explanation](./techniques/hyper_connections.md) - best_model_loss: `3.2327` -> loss: `3.2741` - train_loss: `3.2388` - peak memory: `68729 MiB` - step_avg: `928.26ms` - did not beat the old best
 
+
+## Autoresearch Full-Run Keeps
+
+These are the recent greedy full-run improvements. Each row adds one new change on top of the previous best and uses the normal 5100-step training run.
+
+GOAT Sink Prior - [paper](https://arxiv.org/abs/2601.15380) | [explanation](./techniques/goat_sink_prior.md) - baseline_loss: `3.2354` -> confirmed_loss: `3.2298` - runs: `F74` / `F74c` - one learned key-0 sink prior per head
+
+GatedNorm - [paper](https://arxiv.org/abs/2601.22966) | [explanation](./techniques/gated_norm.md) - best_model_loss: `3.2298` -> new_best_model_loss: `3.2230` - run: `F77` - low-rank gate after RMSNorm
+
+HybridNorm - [paper](https://arxiv.org/abs/2503.04598) | [explanation](./techniques/hybrid_norm.md) - best_model_loss: `3.2230` -> loss: `3.2224` - run: `F82` - small gain, kept pending confirmation because improvement `<0.003`
+
+Composable Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./techniques/composable_gated_attention.md) - best_model_loss: `3.2224` -> new_best_model_loss: `3.2128` - run: `F82F84` - gated attention composed on top of XSA + GOAT
+
+Composable Value Residual - [paper](https://arxiv.org/abs/2410.17897) | [explanation](./techniques/value_residual.md) - best_model_loss: `3.2128` -> new_best_model_loss: `3.2011` - run: `F85` - ResFormer-style value residual inside the normal attention path
+
+U-net Long Skips - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1979` - run: `F87` - mirrored early-to-late layer skips with scalar gates
+
+Aggregate Winning Stack - [checkpoint](external archive: F87c/state_step005100.pt) - best_model_loss: `3.1979` -> loss: `3.1961` - run: `F87c` - all current winning changes together, pending confirmation because improvement `<0.003`
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
