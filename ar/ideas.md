@@ -348,3 +348,7 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Candidate: `learning_rate=0.0014` (1.4x default 0.001) on F87 after fixing JSON training-hyperparameter override plumbing in `train.py`.
 - Verdict: keep_new_best_pending_confirmation. It beats F87=3.1979 by 0.0007, but the margin is below the observed seed-noise band from F87c/F87c2; requires confirmation before becoming trusted best.
 - best_config not updated yet until confirmation. Next action: run F90r2 confirmation or continue queue depending backlog priority.
+
+## F90r2 confirmation — learning-rate ×1.4 (2026-07-14)
+- Full independent 5100-step confirmation: val_loss 3.1965, peak memory 58632 MiB, step_avg 491.00ms.
+- Confirms F90r=3.1972: both fresh runs beat F87=3.1979. The 0.0014 learning rate is promoted in ar/best_config.json; F90r2=3.1965 is the new trusted best.
