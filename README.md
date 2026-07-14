@@ -260,6 +260,21 @@ Plot saved to: logs/lr_finder_blagpt/lr_finder_plot.png
 Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
 ```
 
+
+## Autoresearch checkpoint archive
+
+Latest archived full-run checkpoint:
+
+- **Run:** F87c aggregate confirmation
+- **Validation loss:** `3.1961` at step `5100`
+- **Local checkpoint:** `bla_gpt/logs/ar_full_F87c_0/state_step005100.pt`
+- **S3 checkpoint:** `s3://tts-team-dev/checkpoints/blagpt/autoresearch/jul8/F87c/state_step005100.pt`
+- **Size:** `3,039,250,572` bytes
+- **S3 ETag:** `f44e2f6445ea8929cbe3addf349bb16c-363`
+- **Uploaded:** `2026-07-14 08:12:27 UTC`
+
+The current autoresearch ledger is `ar/full_results.tsv`; the active best config is `ar/best_config.json`.
+
 ## Best Model So Far
 
 - Check `best_model_config.py` for the best model configuration so far.
