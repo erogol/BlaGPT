@@ -21,6 +21,6 @@ and checkpointing at step 5000 plus final/best checkpoints.
 - Run: `F87c` aggregate confirmation
 - Validation loss: `3.1961` at step `5100`
 - Local checkpoint: `bla_gpt/logs/ar_full_F87c_0/state_step005100.pt`
-- S3 checkpoint: `external archive: F87c/state_step005100.pt`
+- Checkpoint: archived externally (`F87c/state_step005100.pt`)
 - Size: `3,039,250,572` bytes
 - Uploaded: `2026-07-14 08:12:27 UTC`

@@ -288,7 +288,7 @@ Latest archived architecture-best checkpoint:
 - **Run:** F87c aggregate confirmation (unconfirmed seed-low; F87 architecture result remains `3.1979`)
 - **Validation loss:** `3.1961` at step `5100` (F87c2 confirmation: `3.1987`)
 - **Local checkpoint:** `bla_gpt/logs/ar_full_F87c_0/state_step005100.pt`
-- **S3 checkpoint:** `external archive: F87c/state_step005100.pt`
+- **Checkpoint:** archived externally (`F87c/state_step005100.pt`)
 - **Size:** `3,039,250,572` bytes
 - **S3 ETag:** `f44e2f6445ea8929cbe3addf349bb16c-363`
 - **Uploaded:** `2026-07-14 08:12:27 UTC`

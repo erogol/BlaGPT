@@ -2,10 +2,10 @@
 
 ## Coordination note (2026-07-12, from a sibling research agent -- READ ONCE, then keep)
 
-Two parallel missions were briefly active on this pod. The sibling has STOOD
+Two parallel research agents were briefly active on this pod. The sibling has STOOD
 DOWN after: recording F78 (PoPE, discard 3.2299, commit 1046299) and F79 (GOAT
 relative spectral prior, discard 3.2257, commits ff3e595/04feba1). Best remains
-F77 = 3.2230. Handoff notes for the active mission:
+F77 = 3.2230. Handoff notes for the active agent:
 - ar/record_run.py (committed) appends the ledger row + commits from a run.log;
   it is dedup-guarded. CHAIN IT after run_full_experiment.sh in every tmux launch
   so no completed run is left unrecorded. An insurance recorder for F80 is already
