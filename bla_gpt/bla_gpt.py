@@ -14,17 +14,17 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 
-from attentions import (Attention, DilatedAttention, ExclusiveSelfAttention, ForgettingAttention,
-                        GatedAttention, KDAAttention, KVShiftingAttention,
+from attentions import (Attention, ComposableGatedAttention, DilatedAttention, ExclusiveSelfAttention, ForgettingAttention,
+                        GatedAttention, GOATSinkAttention, KDAAttention, KVShiftingAttention,
                         MultiheadDiffAttn, MultiheadDiffAttnv2, MultiHeadLatentAttention,
                         MultiTokenAttention, PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
 from losses import compute_top_loss, compute_z_loss
 from mlps import (MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, PolyNorm_MLP,
-                  PolyReLU_MLP, Primer_MLP, STEM_MLP, SwiGLU_MLP)
+                  PolyReLU_MLP, Primer_MLP, STEM_MLP, SwiGLU_MLP, tapered_mlp_dims)
 from modules.canon_layer import CanonLayer
 from modules.pattention import Pattention
-from norms import DyTNorm, LayerNorm, RMSNorm
+from norms import DyTNorm, GatedNorm, LayerNorm, PreAffineRMSNorm, RMSNorm
 from torch.nn import functional as F
 
 #
@@ -108,6 +108,29 @@ class GPTConfig(Coqpit):
         False  # Whether to add token embedding to the block input
     )
     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
+
+    # Sequence-length curriculum (experiment: seq-curriculum)
+    seq_curriculum_steps: int = 0
+    seq_curriculum_len: int = 512
+    warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
+    device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
+    mlp_expand: int = 4  # MLP hidden expansion factor (Primer_MLP)
+    use_tapered_mlp: bool = False  # Tapered LMs (arXiv:2606.23670): cosine-taper per-layer Primer MLP width, budget-preserving
+    use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
+    use_goat_sink_prior: bool = False  # GOAT key-only sink prior (arXiv:2601.15380, Litman & Guo, 2026)
+    use_pre_affine_norm: bool = False  # PreAffineRMSNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.3
+    use_gated_norm: bool = False  # GatedNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.4
+    gated_norm_rank: int = 16  # bottleneck rank r for GatedNorm low-rank gate
+    affine_attn_momentum: float = 0.95  # EMA momentum rho for affine-scaled attention alpha_ma
+    use_hybrid_norm: bool = False  # HybridNorm (arXiv:2503.04598): QKV-norm in attention + Post-Norm in FFN
+    use_composable_gated_attn: bool = False  # Composable Gated Attention (arXiv:2505.06708) on top of GOAT sink
+    attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
+    use_value_residual: bool = False  # Value Residual Learning (arXiv:2410.17897): learnable-plus mix of first-layer V into deeper layers
+    use_affine_scaled_attn: bool = False  # Affine-Scaled Attention (arXiv:2602.23057): [alpha*softmax + beta] @ V with EMA-tracked beta
+    affine_attn_momentum: float = 0.95  # EMA momentum rho for alpha_ma in affine-scaled attention
+    use_unet_skips: bool = False  # U-net long skips (F87, modded-nanogpt lineage): decoder layer i adds w_i * encoder(n-1-i) output
+    unet_skip_init: float = 0.25  # init for U-net skip scalars (chain-20 best: 0.25)
+    use_oasis_depth_softmax1: bool = False  # OASIS depth-Softmax1 null route for AttnResidual (arXiv:2605.17887), default off
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -292,6 +315,13 @@ def get_attention(config, depth=None):
     if attn_type == "regular":
         return Attention(config)
     elif attn_type == "xsa":
+        if getattr(config, "use_affine_scaled_attn", False):
+            from attentions import AffineScaledAttention
+            return AffineScaledAttention(config)
+        if getattr(config, "use_composable_gated_attn", False):
+            return ComposableGatedAttention(config)
+        if getattr(config, "use_goat_sink_prior", False):
+            return GOATSinkAttention(config)
         return ExclusiveSelfAttention(config)
     if attn_type == "latent":
         return MultiHeadLatentAttention(config)
@@ -309,6 +339,9 @@ def get_attention(config, depth=None):
         return MultiTokenAttention(config)
     elif attn_type == "kda":
         return KDAAttention(config)
+    elif attn_type == "pope":
+        from attentions import PoPEAttention
+        return PoPEAttention(config)
     elif attn_type == "gated":
         return GatedAttention(config)
     elif attn_type == "DiffAttnv2":
@@ -318,6 +351,10 @@ def get_attention(config, depth=None):
 
 def get_norm(config):
     if config.norm_layer == "rmsnorm":
+        if getattr(config, "use_gated_norm", False):
+            return GatedNorm(config.n_embd, rank=getattr(config, "gated_norm_rank", 16))
+        if getattr(config, "use_pre_affine_norm", False):
+            return PreAffineRMSNorm(config.n_embd)
         return RMSNorm(config.n_embd)
     elif config.norm_layer == "layernorm":
         return LayerNorm(config.n_embd, config.bias)
@@ -331,6 +368,9 @@ def get_mlp(config, layer_idx=None):
     if layer_idx is not None and config.is_stem_layer(layer_idx):
         return STEM_MLP(config)
 
+    if getattr(config, "use_tapered_mlp", False) and config.activation != "primer":
+        raise ValueError("use_tapered_mlp is only supported with activation='primer'")
+
     # Standard MLP selection
     if config.activation == "gelu":
         return MLP(config)
@@ -339,6 +379,10 @@ def get_mlp(config, layer_idx=None):
     elif config.activation == "swiglu":
         return SwiGLU_MLP(config)
     elif config.activation == "primer":
+        if getattr(config, "use_tapered_mlp", False) and layer_idx is not None:
+            base_d_ff = getattr(config, "mlp_expand", 4) * config.n_embd
+            layer_dims = tapered_mlp_dims(base_d_ff, config.n_layer)
+            return Primer_MLP(config, ff_dim=layer_dims[layer_idx])
         return Primer_MLP(config)
     elif config.activation == "negout":
         return Negout_MLP(config)
@@ -383,6 +427,7 @@ class Block(nn.Module):
         self.attn = get_attention(config, depth)
         self.ln_2 = get_norm(config)
         self.mlp = get_mlp(config, depth)  # Pass depth for STEM layer selection
+        self.use_hybrid_norm = getattr(config, "use_hybrid_norm", False)
 
         # Optional norm layers as per Gemma2
         self.ln_3 = get_norm(config) if config.use_pre_post_norm else None
@@ -720,11 +765,21 @@ class GPT(nn.Module):
                 vocab_mult=config.engram_vocab_mult,
             )
 
+        # U-net long skips (F87): one learnable scalar per encoder/decoder pair
+        if getattr(config, "use_unet_skips", False):
+            self.skip_weights = nn.Parameter(torch.full((config.n_layer // 2,), float(config.unet_skip_init)))
+
         # init all weights
         self.apply(self._init_weights)
+        self._init_attn_res()
+        self._init_value_residual()
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
-            if pn.endswith("c_proj.weight"):
+            if pn.endswith("alpha_proj.weight"):
+                # Affine-Scaled Attention (F81): zero-init (alpha=0.5) must
+                # survive the global _init_weights pass, per arXiv:2602.23057.
+                torch.nn.init.zeros_(p)
+            elif pn.endswith("c_proj.weight"):
                 if self.zero_init_proj_layers:
                     torch.nn.init.zeros_(p)
                 else:
@@ -802,6 +857,37 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+    def _init_attn_res(self):
+        if getattr(self.config, "use_attn_res", False):
+            self.attn_res_w = nn.Parameter(torch.zeros(self.config.n_layer + 1, self.config.n_embd))
+
+    def _attn_res_route(self, scores):
+        # OASIS depth-Softmax1 (Luo et al., 2026; arXiv:2605.17887):
+        # add an explicit zero-vector null branch to AttnResidual depth routing.
+        # Gate-off is the original depth softmax exactly.
+        if not getattr(self.config, "use_oasis_depth_softmax1", False):
+            return scores.softmax(dim=0)
+        m = scores.max(dim=0, keepdim=True).values
+        weights = torch.exp(scores - m)
+        null_weight = torch.exp(-m)
+        return weights / (null_weight + weights.sum(dim=0, keepdim=True))
+
+    def _init_value_residual(self):
+        # Value Residual Learning (arXiv:2410.17897), learnable-plus variant:
+        # lambda1 = softmax(per-layer logits) * scale (scale init = n_layer),
+        # lambda2 = per-layer learnable, init 0.5. V1 kept in autograd graph
+        # (paper-faithful; repo's standalone ResFormer detaches it).
+        if not getattr(self.config, "use_value_residual", False):
+            return
+        n = self.config.n_layer
+        self.v_res_logits = nn.Parameter(torch.randn(n - 1) * 0.1)
+        self.v_res_scale = nn.Parameter(torch.tensor(float(n)))
+        self.v_res_lambda2 = nn.Parameter(torch.full((n - 1,), 0.5))
+        self._v_res_holder = {}
+        for i, block in enumerate(self.transformer.h):
+            block.attn.v_res_holder = self._v_res_holder
+            block.attn.v_res_depth = i
+
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
@@ -830,7 +916,33 @@ class GPT(nn.Module):
         if self.config.use_hyper_connections:
             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
 
+        _attn_res = getattr(self.config, "use_attn_res", False) and not self.config.use_hyper_connections
+        _ar_bs = getattr(self.config, "attn_res_block_size", 0)
+        if getattr(self.config, "use_value_residual", False):
+            self._v_res_holder["v1"] = None
+            self._v_res_holder["lam1"] = F.softmax(self.v_res_logits, dim=0) * self.v_res_scale
+            self._v_res_holder["lam2"] = self.v_res_lambda2
+        if _attn_res:
+            if _ar_bs > 0:
+                _ar_blocks = []       # completed block sums
+                _ar_partial = x       # current block partial (starts with embedding)
+                _ar_vs = None
+            else:
+                _ar_vs = [x]  # v0 = embedding output
+        # U-net long skips (F87)
+        _unet_skips = [] if getattr(self.config, "use_unet_skips", False) else None
+        _n_layers = len(self.transformer.h)
         for layer_idx, block in enumerate(self.transformer.h):
+            if _attn_res:
+                _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
+                _w = self.attn_res_w[layer_idx]
+                _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)  # (L, b, t)
+                _alpha = self._attn_res_route(_scores)
+                x = _srcs[0] * _alpha[0].unsqueeze(-1)
+                for _i in range(1, len(_srcs)):
+                    x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
+            if _unet_skips is not None and layer_idx >= _n_layers // 2:
+                x = x + self.skip_weights[layer_idx - _n_layers // 2] * _unet_skips[_n_layers - 1 - layer_idx]
             # Apply engram based on variant
             if self.engram is not None:
                 if self.config.use_hyper_connections:
@@ -844,7 +956,29 @@ class GPT(nn.Module):
                     x = self.engram.mix_at_layer(x, x0, x0_ngram, layer_idx)
                 else:  # "simple" or "minimal"
                     x = x + self.engram(x, idx)
-            x = block(x, token_ids=idx)
+            if _attn_res:
+                _h_in = x
+                x = block(x, token_ids=idx)
+                if _ar_bs > 0:
+                    _ar_partial = _ar_partial + (x - _h_in)
+                    if (layer_idx + 1) % _ar_bs == 0:
+                        _ar_blocks.append(_ar_partial)
+                        _ar_partial = torch.zeros_like(_ar_partial)
+                else:
+                    _ar_vs.append(x - _h_in)
+            else:
+                x = block(x, token_ids=idx)
+            if _unet_skips is not None and layer_idx < _n_layers // 2:
+                _unet_skips.append(x)
+
+        if _attn_res:
+            _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
+            _w = self.attn_res_w[self.config.n_layer]
+            _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)
+            _alpha = self._attn_res_route(_scores)
+            x = _srcs[0] * _alpha[0].unsqueeze(-1)
+            for _i in range(1, len(_srcs)):
+                x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
 
         if self.config.use_hyper_connections:
             x = x.sum(dim=2)

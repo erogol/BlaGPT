@@ -1,0 +1,40 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index d209cc1..1b62c8d 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -109,6 +109,10 @@ class GPTConfig(Coqpit):
+     )
+     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
+ 
++    # Sequence-length curriculum (experiment: seq-curriculum)
++    seq_curriculum_steps: int = 0
++    seq_curriculum_len: int = 512
++
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+     use_engram: bool = False
+diff --git a/bla_gpt/train_ar.py b/bla_gpt/train_ar.py
+index 6056753..42bbc07 100644
+--- a/bla_gpt/train_ar.py
++++ b/bla_gpt/train_ar.py
+@@ -480,10 +480,19 @@ if __name__ == "__main__":
+ 
+         # --------------- TRAINING SECTION BEGIN -----------------
+         model.train()
++        # Sequence-length curriculum (experiment: seq-curriculum): train the
++        # first N steps on a shorter prefix for faster early steps; validation
++        # always runs at full length so the metric is unchanged.
++        _cur_steps = getattr(model_config, "seq_curriculum_steps", 0)
++        _cur_len = getattr(model_config, "seq_curriculum_len", 512)
++        _use_short = _cur_steps > 0 and step < _cur_steps
+         for i in range(1, train_accumulation_steps + 1):
+             # forward pass
+             with ctx:
+-                _, loss = model(x, y)
++                if _use_short:
++                    _, loss = model(x[:, :_cur_len].contiguous(), y[:, :_cur_len].contiguous())
++                else:
++                    _, loss = model(x, y)
+                 metrics = None
+                 if type(loss) is dict:
+                     metrics = {k: v for k, v in loss.items() if k != "total"}

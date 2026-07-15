@@ -1,0 +1,99 @@
+n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
+0	9740ded	baseline	3.452022	0.000000	46721	1875	102.8	keep	baseline	3 runs: mean=3.455141 sigma=0.003187 eps=0.006374 [class=TRANSFERABLE]
+1	9740ded	9740ded	3.480689	-0.028667	41981	2191	1148.7	discard	parallel_blocks	14pct faster but worse quality (335M vs 495M params)
+2	9740ded	9740ded	3.455125	0.003103	46710	1872	981.5	discard	engram_all_layers	within noise, 6 layers is sufficient
+3	9740ded	9740ded	3.457220	0.005198	45316	1908	1000.3	discard	plte_dim_128	slightly worse, 256 is correct dim
+4	9740ded	9740ded	3.446940	-0.005082	48778	1812	950.0	rerun?	full_mha	borderline (within eps), rerunning to confirm
+4b	f32b8a3	9740ded	3.446820	-0.005202	48769	1816	952.1	keep	full_mha_rerun	confirmed: both runs beat baseline. NEW BEST [class=TRANSFERABLE]
+5	f32b8a3	f32b8a3	3.448000	0.001180	49358	1784	935.3	discard	mha_plus_ptob	worse than MHA alone, +39M params for nothing
+6	f32b8a3	f32b8a3	3.446291	-0.000529	48769	1811	949.5	rerun?	mha_plus_canon	borderline, free (no extra params/vram), rerunning
+6b	f32b8a3	f32b8a3	3.449039	0.002219	48769	1816	952.1	discard	mha_plus_canon_rerun	rerun worse, first run was noise. canon doesnt stack
+7	f32b8a3	f32b8a3	3.447752	0.000932	48769	1804	945.8	discard	mha_lr_1.4x	1.4x LR overshoots, 0.001 is well-tuned
+8	f32b8a3	f32b8a3	3.446609	-0.000211	48769	1806	946.9	discard	mha_lr_0.7x	within noise, LR well-tuned in 0.0007-0.001 range
+9	f32b8a3	f32b8a3	3.443671	-0.003149	48769	1816	952.1	rerun?	rope_theta_1e6	borderline (-0.0031, within eps), config-only on MHA best. rerunning as 9b
+9b	b321d27	f32b8a3	3.442740	-0.004080	48769	1816	952.1	keep	rope_theta_1e6_rerun	confirmed: both runs beat best (3.4437, 3.4427). NEW BEST [class=TRANSFERABLE]
+14	82df040	b321d27	3.458004	0.015264	49935	1724	903.9	chain	value_embeddings	chain 1/4: lambda0.5 first3+last3 layers, +38.6M params, 4.7pct fewer steps. tune lambda next
+14b	82df040	b321d27	3.456745	0.014005	49935	1733	908.6	chain	value_embeddings_l0.1	chain 2/4: lambda 0.1 vs 0.5 flat (-0.0013, noise). lambda not the issue; next test VE replacing PLTE (redundancy hyp)
+14c	82df040	b321d27	3.454357	0.011617	46100	1958	1026.6	chain	ve_replaces_plte	chain 3/4: PLTE off frees 159M params, +13pct steps, but VE alone worse than PLTE. final: lambda 0.5 w/o PLTE
+14d	82df040	b321d27	3.454438	0.011698	46100	1964	1029.7	discard	value_embeddings_final	chain 4/4 verdict: VE flat at 3.4544 regardless of lambda; does not replace PLTE nor stack. DISCARD idea
+15	b321d27	b321d27	3.447489	0.004749	48769	1817	952.6	discard	rope_theta_1e7	not monotone: 1e6 is near-optimal. lost by <2eps, rope variants slot stays open (3e5/3e6)
+16	b321d27	b321d27	3.462706	0.019966	52104	1745	914.9	discard	gated_attention	fixed-step README win does not transfer to time budget: +7M params, 4pct fewer steps, clearly worse
+17	5a3e301	b321d27	3.460022	0.017282	50846	1812	950.0	chain	ema_eval	chain 1/4: decay0.98/every5 = 250-step horizon lags LR anneal (~100 steps). tune horizon next
+17b	5a3e301	b321d27	3.457479	0.014739	50846	1782	934.3	chain	ema_d0.99_every1	chain 2/4: horizon fix only -0.0025. EMA redundant WITH anneal; chain 3 tests EMA REPLACING anneal
+17c	5a3e301	b321d27	3.459661	0.016921	50846	1790	938.5	discard	ema_d0.995_every1	chain 3/4 verdict: trajectory 3.4600->3.4575->3.4597 diverging. EMA fights warmdown. chain closed early
+18	b321d27	b321d27	3.446026	0.003286	48769	1813	950.5	discard	rope_theta_3e5	theta map complete: 10k 3.4468, 3e5 3.4460, 1e6 3.4427 (opt), 1e7 3.4475. exploit line exhausted
+19	b321d27	b321d27	3.443685	0.000945	48870	1802	944.8	discard	res_weights	statistical tie with best (+0.0009, well under eps) but does not beat it. near-miss, variants slot open
+20	0876856	b321d27	3.457022	0.014282	48864	1813	950.5	chain	unet_skips	chain 1/4: w-init 1.0. smoke strongly better (6.13 vs 6.24) but 600s worse: early boost washes out, late contamination. tune init next
+20b	0876856	b321d27	3.444610	0.001870	48864	1804	945.8	chain	unet_init0.25	chain 2/4: -0.0124 vs run1, strong trajectory. direction says lower init; next 0.1
+20c	0876856	b321d27	3.445390	0.002650	48864	1808	947.9	discard	unet_init0.1	chain 3/4 verdict: knob curve 1.0=3.4570 0.25=3.4446 0.1=3.4454 plateaus at tie-with-best. closed early. best invent line so far, combo candidate
+21	b321d27	b321d27	3.440910	-0.001830	44930	2074	1087.4	rerun?	no_plte	PLTE removal: -159M params, +14pct steps, beats best by 0.0018 (borderline). confirming
+21b	611705b	b321d27	3.439277	-0.003463	44930	2074	1087.4	keep	no_plte_confirm	CONFIRMED: both runs beat best (3.4409, 3.4393). NEW BEST 3.4393. -159M params, +14pct steps [class=TRANSFERABLE]
+22	611705b	611705b	3.476925	0.037648	44930	1992	1044.4	discard	z_loss_1e-4	worst of day: hurts quality AND costs 4pct steps. z_loss line dead
+23	0c851a5	611705b	3.442804	0.003565	45028	2058	1079.0	discard	no_plte_unet0.25	unet combo worse than no_plte alone. early boost still washes; residual contamination dominates
+24	59f33c3	611705b	3.438642	-0.000635	45029	2056	1077.9	rerun?	no_plte_res_weights	beats best by 0.0007 (borderline). confirming
+24b	pending	611705b	3.440217	0.000783	45029	2054	1076.9	discard	no_plte_res_weights_confirm	rerun worse than best (3.4402 > 3.4393). fluke run 1. discard
+25	611705b	611705b	3.814919	0.375619	48624	993	520.6	discard	moe_ffn	worst of session: 2x slower (993 steps), aux_loss dominates, routing did not converge in budget
+26	f5749ed	611705b	4.386320	0.947020	55045	1296	679.5	discard	mtp_n2	metric averages both heads; t+2 head ~1.9 nats harder so incomparable by construction. also -37pct steps. MTP dead under this harness metric
+27	1722e3c	611705b	3.519800	0.080500	46343	1589	833.1	discard	attn_sink	custom mask drops SDPA causal fast-path: -23pct steps, sink gains nowhere near enough
+28	611705b	611705b	3.438087	-0.001213	42465	2216	1161.8	rerun?	n_layer11	capacity-for-steps again: +7pct steps, beats best by 0.0012 (borderline). confirming
+28b	a3689c5	611705b	3.435437	-0.003863	42465	2218	1162.9	keep	n_layer11_confirm	CONFIRMED: both runs beat best (3.4381, 3.4354). NEW BEST 3.4354. -9.5M params, +7pct steps [class=TRANSFERABLE]
+29	f8584ed	a3689c5	3.436127	0.000690	40890	2373	1244.1	discard	n_layer10	depth curve: 12=3.4393 11=3.4354 10=3.4361. 11 is optimum, 10 is a tie. depth line closed
+30	f8584ed	a3689c5	3.519724	0.084287	41823	2348	1231.0	discard	weight_sharing_6of11	shared capacity hit 10x larger than step gain. line closed
+31	6bf0fa2	a3689c5	3.415827	-0.019610	42463	2505	1313.3	keep	seq_curriculum_800x512	CLEAN KEEP (beats best-eps 3.4290): +13pct steps, curriculum through easy region. NEW BEST 3.4158 [class=TRANSFERABLE]
+31b	24281a0	6bf0fa2	3.409866	-0.005961	42463	2655	1392.0	chain	seq_curriculum_1200	chain 2: 800=3.4158 1200=3.4099, still descending. probing 1600
+31c	24281a0	6bf0fa2	3.412860	-0.002967	42463	2792	1463.8	chain	seq_curriculum_1600	curve turned: 800=3.4158 1200=3.4099 1600=3.4129. optimum 1200, confirming
+31d	b2ca8da	6bf0fa2	3.410179	-0.005648	42463	2651	1389.9	keep	seq_curriculum_1200_confirm	CONFIRMED: both runs beat 3.4158 (3.4099, 3.4102). NEW BEST 3.4099. chain closed 4/4, two bests produced [class=TRANSFERABLE]
+32	f4c6feb	b2ca8da	3.407414	-0.002452	42455	2754	1443.9	rerun?	seq_curriculum_len384	len knob: 384 beats 512 by 0.0025 (borderline). confirming
+32b	c9e6600	b2ca8da	3.407692	-0.002174	42455	2757	1445.5	keep	seq_curriculum_len384_confirm	CONFIRMED: both beat 3.4099 (3.4074, 3.4077). NEW BEST 3.4074 [class=TRANSFERABLE]
+33	4b3430b	c9e6600	3.413088	0.005674	42480	2847	1492.6	discard	seq_curriculum_len256	len curve turned: 512=3.4099 384=3.4074 256=3.4131. 384 optimum. len line closed
+34	4b3430b	c9e6600	3.405524	-0.001890	42463	2703	1417.2	rerun?	seq_curriculum_3stage	3-stage 384/640/1024 beats 2-stage by 0.0019 (borderline). confirming
+34b	4b3430b	c9e6600	3.407821	0.000381	42463	2706	1418.7	discard	seq_curriculum_3stage_confirm	rerun misses best by 0.0004: statistical tie, not a win. 2-stage 1200@384 stays crowned. curriculum family closed
+35	4b3430b	c9e6600	3.404696	-0.002718	42455	2754	1443.9	rerun?	warmup100	warmup 250-100: +150 full-LR steps, beats best by 0.0027 (borderline). confirming
+35b	52df558	c9e6600	3.406199	-0.001215	42455	2748	1440.7	keep	warmup100_confirm	CONFIRMED: both beat 3.4074 (3.4047, 3.4062). NEW BEST 3.4047. override-pass code lands with this keep [class=BUDGET-ARTIFACT]
+36	956e334	52df558	3.406660	0.001964	42455	2754	1443.9	discard	warmup50	warmup curve turned: 250=3.4074 100=3.4047 50=3.4067. optimum 100, knob closed
+37	956e334	52df558	3.405028	0.000332	42455	2910	1525.7	discard	batch_ramp_800	tie: +6pct steps but half-batch noise dilutes per-step quality. early-boost washes out by 600s (unet pattern). family closed
+38	956e334	52df558	3.422904	0.018208	40662	2863	1501.0	discard	width704	width cut hurts 10x more than depth cut. 768 load-bearing. width closed
+39	956e334	52df558	3.426424	0.021728	42455	2871	1505.2	discard	muon_ns3	only +4pct steps, orthogonalization quality collapse. NS=5 earns its cost. line closed
+40	956e334	52df558	3.405975	0.001279	42426	2751	1442.3	discard	head_dim128	tie, no step gain either. head shape quality-neutral. closed
+41	956e334	52df558	3.410522	0.005826	48764	2723	1427.6	discard	compile_max_autotune	autotune picked SLOWER kernels at steady state: -31 steps, +6GB VRAM. default compile wins. closed
+42	956e334	52df558	3.410168	0.005472	42455	2931	1536.7	discard	seq_curriculum_1600x384	joint corner: steps-opt does not shift later at len 384. 1200@384 stands. family fully mapped
+43	956e334	52df558	3.407450	0.002954	42457	2719	1425.5	discard	res_weights_3rd	res_weights closed: 3rd audition still a tie (3.4075 vs 3.4047). question answered, mechanism discarded.
+44	956e334	52df558	SIGSEGV	-	-	-	-	discard	mqa_n_kv1	SIGSEGV (rank-init infra fluke), relaunching
+44	956e334	52df558	3.453672	0.049176	41329	2828	1482.7	discard	mqa_n_kv1	MQA severely hurts quality (3.4537 +0.049). KV bottleneck too extreme. closed
+45	956e334	52df558	3.404227	-0.000469	42455	2823	1480.1	rerun?	nobias	bias=False: beats best by 0.0005 (borderline), +2.5pct steps. confirming
+45b	956e334	52df558	3.406556	0.001862	42454	2828	1482.7	discard	nobias_confirm	run2 misses best (3.4066 vs 3.4047). statistical tie, not a win. closed
+46	956e334	52df558	ERROR	-	-	-	-	discard	kda_interleaved	KDA requires fla (Flash Linear Attention) not installed. skipped
+47	956e334	52df558	3.424044	0.019348	45383	2641	1384.6	discard	gated_attention	gate_proj adds params: -113 steps, net negative. attention sink claim not enough to overcome cost
+48	956e334	52df558	ERROR	-	-	-	-	discard	diff_attn_v1	DiffAttn requires flash_attn not installed. skipped
+49	956e334	52df558	3.442099	0.037503	47192	2444	1281.4	discard	diff_attn_v2	doubled query heads too costly: -275 steps, +7MB VRAM. architecture overhead kills budget
+50	956e334	52df558	ERROR	-	-	-	-	discard	forgetting_attn	self.mask=None bug in _forgetting_attention: mask not initialized before first call. code bug, not config. skipped
+51	956e334	52df558	3.422681	0.018085	45414	2665	1397.2	discard	kvshifting_attn	KV shift: +VRAM, -94 steps, no quality gain. attention sweep exhausted
+51	956e334	52df558	SIGSEGV	-	-	-	-	discard	kvshifting_attn	SIGSEGV rank-init fluke, relaunching
+52	956e334	52df558	3.465228	0.061032	42455	2245	1177.0	discard	weight_decay_0.1	L2 with Muon harmful: -578 steps, Muon orthogonalization fights L2 penalty. closed
+53	956e334	52df558	3.528596	0.124400	44071	2676	1403.0	discard	dytnorm	tanh saturation destroys quality: +0.124. RMSNorm is optimal, closed
+54	HEAD	52df558	3.403597	-0.001099	42455	2744	1438.6	rerun?	grad_clip_1.0	beats best by 0.0011, borderline. 2744 steps (+79 vs base). confirming 54b
+54b	HEAD	52df558	3.408431	0.003635	42455	2736	1434.5	discard	grad_clip_1.0_confirm	run2 misses best by 0.0037: 3.4036/3.4084 high variance, statistical tie, discard
+55	HEAD	52df558	3.406004	0.001908	42455	2737	1435.0	discard	grad_clip_0.5	chain: 3.4036/3.4084/3.4060 — variance ~0.004, clip value inert, signal not strong enough. closed
+56	956e334	52df558	3.420833	0.016137	42455	2750	1441.8	discard	rope_simplified	concat-RoPE worse than 2D rotation: +0.016. standard rope=optimal, closed
+57	HEAD	52df558	3.407937	-	42455	2739	1436.0	debug	snapshot_avg_k8_buggy	BUG: swap was in last_step path, harness stops via time-budget path — mechanism never ran. fixed, rerunning
+57	HEAD	52df558	3.408378	0.003682	42455	2741	1437.1	discard	snapshot_avg_k8_fixed	swap verified in time-budget path: 3.4084 (+0.0037). uniform avg mixes stale warmdown weights, same failure mode as EMA. weight-averaging family closed
+58	HEAD	52df558	3.408533	-	42455	2739	1436.0	debug	device_batch64_noop	BUG: GPTConfig lacks device_batch_size field, Coqpit dropped key silently (Accumulation steps: 2 in log). field added, rerunning
+58	HEAD	52df558	OOM	-	-	-	-	discard	device_batch64	OOM at seq1024 phase even with expandable_segments (needs +12GB). db=64 does not fit, only 32 valid. BUDGET-ARTIFACT line closed
+59	HEAD	52df558	3.410335	0.005639	39986	3028	1587.5	chain	activation_primer	ARCH chain 1: relu2 frees 26M params, +284 steps, near-tie (+0.0056). activation family has signal, probing polynorm
+60	HEAD	52df558	3.471758	0.067062	42035	2801	1468.5	discard	activation_polynorm	ARCH chain 2: polynorm badly loses (+0.067). primer still the only near-tie
+61	HEAD	52df558	3.396179	-0.008521	42449	2841	1489.5	keep	primer_expand6	CLEAN KEEP (3.3962 < best-eps 3.3983). NEW BEST. ReLU2 MLP at expand=6: param parity w/ swiglu, 2 matmuls not 3, +97 steps. activation chain 3/4 [class=ARCH]
+62	57bdb9b	57bdb9b	3.409586	0.013407	52694	2364	1239.4	chain	attn_res_kimi	chain 1: quality-per-step BETTER than base but torch.stack impl costs -477 steps +10GB. reimplementing aggregation efficiently
+62b	HEAD	57bdb9b	3.391528	-0.004651	43917	2536	1329.6	rerun?	attn_res_efficient	chain 2: loop impl recovers +172 steps, beats best by 0.0047 (borderline). confirming 62c
+62c	HEAD	57bdb9b	3.391956	-0.004223	43917	2555	1339.6	keep	attn_res_confirm	CONFIRMED: both runs beat 3.3962 (3.3915/3.3920). NEW BEST 3.3915. Kimi AttnRes: softmax over layer deltas, +9K params [class=ARCH]
+63	HEAD	57bdb9b	3.983206	0.591706	58865	1314	688.9	discard	kda_retest	fla kernels 2x slower than flash-SDPA: 1314 steps, +15GB. linear attention cannot compete at 600s. closed
+64	HEAD	57bdb9b	3.465764	0.074264	48156	2359	1236.8	discard	diffattn_v1_retest	flash-kernel DiffAttn still loses: -196 steps +4.2GB, quality worse. differential attention family fully closed
+65	HEAD	57bdb9b	3.516862	0.125362	66614	1867	978.8	discard	forgetting_attn_fixed	mask bug fixed but manual TxT attention off flash path: 1867 steps, 66GB. mechanism closed, fix stays
+66	HEAD	57bdb9b	3.399989	0.008489	43608	2704	1417.7	discard	block_attn_res_bs4	steps +149 but quality -0.0085 vs full AttnRes: block sums lose layer granularity. full AttnRes stays
+67	08389e3	57bdb9b	3.390924	-0.000604	46244	2434	1276.1	rerun?	mlp_expand8	expand curve 4/6/8 = 3.4103/3.3962/3.3909 still descending. +26M params -121 steps. hair-thin beat, confirming
+67b	08389e3	57bdb9b	3.391058	-0.000462	46244	2442	1280.3	keep	mlp_expand8_confirm	CONFIRMED: both beat 3.3915 (3.3909/3.3911, tight pair). NEW BEST 3.3909. expand curve 4/6/8 descending, +26M params worth it [class=ARCH]
+68	08389e3	08389e3	3.447536	0.056636	47187	2190	1148.2	discard	pope	PoPE decoupled what/where: doubled qk dim costs -252 steps, quality far off at 600s horizon. impl stays config-gated
+69	08389e3	08389e3	3.387920	-0.003138	48574	2322	1217.4	rerun?	mlp_expand10	curve STILL descending: 4/6/8/10 = 3.4103/3.3962/3.3909/3.3879. +26M params -120 steps. confirming
+69b	08389e3	08389e3	3.383645	-0.005555	48574	2335	1224.2	keep	mlp_expand10_confirm	CONFIRMED: both beat 3.3909 (3.3879/3.3836). NEW BEST 3.3836. expand curve 4/6/8/10 all descending [class=ARCH]
+70	08389e3	08389e3	3.387902	0.004257	50999	2216	1161.8	discard	mlp_expand12	curve turned: 4/6/8/10/12 = 3.4103/3.3962/3.3909/3.3836/3.3879. optimum expand=10. chain closed 5pts 2 keeps
+71	08389e3	08389e3	3.377524	-0.006121	46411	2473	1296.6	rerun?	n_layer10_wide_mlp	depth rebalance on wide MLP: 10 layers +138 steps -14M params, beats by 0.0061 (borderline). confirming
+71b	08389e3	08389e3	3.375010	-0.008635	46411	2486	1303.4	keep	n_layer10_wide_mlp_confirm	CONFIRMED: both runs beat 3.3836 (3.3775/3.3750). NEW BEST 3.3750. 10 layers + wider MLP improves depth/width balance; confirmed transferable architecture change [class=ARCH]

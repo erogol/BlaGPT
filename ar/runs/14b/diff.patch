@@ -1,0 +1,128 @@
+diff --git a/bla_gpt/attentions.py b/bla_gpt/attentions.py
+index e298e55..ae9ced9 100644
+--- a/bla_gpt/attentions.py
++++ b/bla_gpt/attentions.py
+@@ -173,6 +173,13 @@ class Attention(nn.Module):
+         # Causal mask
+         self.mask = None
+ 
++        # Value embeddings: learnable per-layer scalar gate (scalar -> AdamW
++        # in the Muon param split). Only used when `ve` is passed to forward.
++        if getattr(config, "use_value_embeddings", False):
++            self.ve_lambda = nn.Parameter(
++                torch.tensor(float(getattr(config, "value_emb_lambda_init", 0.5)))
++            )
++
+         self.set_layers(config)
+ 
+     def set_layers(self, config):
+@@ -188,7 +195,7 @@ class Attention(nn.Module):
+         # Output projection
+         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+ 
+-    def forward(self, x, q=None, mask=None):
++    def forward(self, x, q=None, mask=None, ve=None):
+         B, T, C = x.size()
+         T_q = q.size(1) if q is not None else T
+ 
+@@ -202,6 +209,11 @@ class Attention(nn.Module):
+         q = self._project_query(q if q is not None else x, B, T_q)
+         k, v = self._project_kv(x, B, T)
+ 
++        # Value embeddings: add gated token-value embedding into V
++        # (modded-nanogpt lineage). ve: (B, T, n_embd)
++        if ve is not None:
++            v = v + self.ve_lambda * ve.view(B, T, self.n_kv_head, self.head_dim)
++
+         # Apply normalization and rotary embeddings if configured
+         if hasattr(self, "q_norm"):
+             q, k = self._apply_norm(q, k)
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index d209cc1..fcfe9eb 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -109,6 +109,13 @@ class GPTConfig(Coqpit):
+     )
+     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
+ 
++    # Value embeddings (modded-nanogpt lineage): shared token->n_embd embedding
++    # added into the attention V projection at selected layers, gated by a
++    # learnable per-layer scalar lambda.
++    use_value_embeddings: bool = False
++    value_emb_layers: list[int] = field(default_factory=list)  # empty = first 3 + last 3 layers
++    value_emb_lambda_init: float = 0.5
++
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+     use_engram: bool = False
+@@ -384,6 +391,15 @@ class Block(nn.Module):
+         self.ln_2 = get_norm(config)
+         self.mlp = get_mlp(config, depth)  # Pass depth for STEM layer selection
+ 
++        # Value embeddings: is this layer selected for V injection?
++        self.use_ve = False
++        if getattr(config, "use_value_embeddings", False):
++            ve_layers = getattr(config, "value_emb_layers", None) or []
++            if len(ve_layers) == 0:
++                # default: first 3 + last 3 layers (modded-nanogpt style)
++                ve_layers = list(range(3)) + list(range(config.n_layer - 3, config.n_layer))
++            self.use_ve = depth in ve_layers
++
+         # Optional norm layers as per Gemma2
+         self.ln_3 = get_norm(config) if config.use_pre_post_norm else None
+         self.ln_4 = get_norm(config) if config.use_pre_post_norm else None
+@@ -406,8 +422,13 @@ class Block(nn.Module):
+         return x + branch_out
+ 
+     def forward(self, x, **kwargs):
+-        # Attention branch (doesn't need kwargs)
+-        x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1)
++        # Value embeddings: pop from kwargs; only pass to attention when this
++        # layer is selected (self.use_ve).
++        ve = kwargs.pop("value_emb", None)
++        attn_kwargs = {"ve": ve} if (getattr(self, "use_ve", False) and ve is not None) else {}
++
++        # Attention branch
++        x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1, **attn_kwargs)
+ 
+         # MLP branch - pass kwargs through
+         x = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, self.res_w2, **kwargs)
+@@ -720,6 +741,13 @@ class GPT(nn.Module):
+                 vocab_mult=config.engram_vocab_mult,
+             )
+ 
++        # Value embeddings: shared token->n_embd table added into attention V
++        # at selected layers ("embed_tokens" in the name routes it to AdamW,
++        # not Muon — see optimizers/__init__.py).
++        self.value_embed_tokens = None
++        if getattr(config, "use_value_embeddings", False):
++            self.value_embed_tokens = nn.Embedding(config.vocab_size, config.n_embd)
++
+         # init all weights
+         self.apply(self._init_weights)
+         # apply special scaled init to the residual projections, per GPT-2 paper
+@@ -827,6 +855,12 @@ class GPT(nn.Module):
+             x0 = x  # Initial token embedding (after dropout)
+             x0_ngram = self.engram.get_ngram_embedding(idx)  # N-gram hash embedding
+ 
++        # Value embeddings: computed once, injected into attention V at
++        # selected layers (gating handled inside Block/Attention).
++        ve = None
++        if self.value_embed_tokens is not None:
++            ve = self.value_embed_tokens(idx)
++
+         if self.config.use_hyper_connections:
+             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
+ 
+@@ -844,7 +878,10 @@ class GPT(nn.Module):
+                     x = self.engram.mix_at_layer(x, x0, x0_ngram, layer_idx)
+                 else:  # "simple" or "minimal"
+                     x = x + self.engram(x, idx)
+-            x = block(x, token_ids=idx)
++            if ve is not None:
++                x = block(x, token_ids=idx, value_emb=ve)
++            else:
++                x = block(x, token_ids=idx)
+ 
+         if self.config.use_hyper_connections:
+             x = x.sum(dim=2)

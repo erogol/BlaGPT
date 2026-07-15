@@ -1,0 +1,33 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index 1b62c8d..7fa8ea3 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -112,6 +112,7 @@ class GPTConfig(Coqpit):
+     # Sequence-length curriculum (experiment: seq-curriculum)
+     seq_curriculum_steps: int = 0
+     seq_curriculum_len: int = 512
++    seq_curriculum_stages: list = field(default_factory=list)  # [[step_bound, seq_len], ...] multi-stage variant
+ 
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+diff --git a/bla_gpt/train_ar.py b/bla_gpt/train_ar.py
+index 42bbc07..c3dafde 100644
+--- a/bla_gpt/train_ar.py
++++ b/bla_gpt/train_ar.py
+@@ -486,6 +486,16 @@ if __name__ == "__main__":
+         _cur_steps = getattr(model_config, "seq_curriculum_steps", 0)
+         _cur_len = getattr(model_config, "seq_curriculum_len", 512)
+         _use_short = _cur_steps > 0 and step < _cur_steps
++        # Multi-stage variant (experiment: seq-curriculum-3stage): list of
++        # [step_bound, seq_len] pairs; first matching bound wins. Takes
++        # priority over the 2-stage fields above.
++        _stages = getattr(model_config, "seq_curriculum_stages", None)
++        if _stages:
++            _use_short = False
++            for _bound, _slen in _stages:
++                if step < _bound:
++                    _use_short, _cur_len = True, _slen
++                    break
+         for i in range(1, train_accumulation_steps + 1):
+             # forward pass
+             with ctx:

@@ -1,0 +1,54 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index d209cc1..63911d2 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -109,6 +109,11 @@ class GPTConfig(Coqpit):
+     )
+     per_layer_token_emb_dim: int = 256  # Dimension of the per-layer token embedding, if use_per_layer_token_emb is True
+ 
++    # U-net long skip connections (experiment: unet). Decoder layer i adds
++    # w * (output of encoder layer n-1-i); one learnable scalar per pair.
++    use_unet_skips: bool = False
++    unet_skip_init: float = 1.0  # initial value of the learnable skip scalars
++
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+     use_engram: bool = False
+@@ -720,6 +725,13 @@ class GPT(nn.Module):
+                 vocab_mult=config.engram_vocab_mult,
+             )
+ 
++        # U-net long skips (experiment: unet): one learnable scalar per
++        # encoder/decoder pair, init 1.0.
++        if config.use_unet_skips:
++            self.skip_weights = nn.Parameter(
++                torch.full((config.n_layer // 2,), float(config.unet_skip_init))
++            )
++
+         # init all weights
+         self.apply(self._init_weights)
+         # apply special scaled init to the residual projections, per GPT-2 paper
+@@ -830,7 +842,14 @@ class GPT(nn.Module):
+         if self.config.use_hyper_connections:
+             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
+ 
++        # U-net long skips (experiment: unet)
++        _unet_skips = [] if self.config.use_unet_skips else None
++        _n_layers = len(self.transformer.h)
++
+         for layer_idx, block in enumerate(self.transformer.h):
++            # U-net skip: decoder layer i receives encoder layer (n-1-i) output
++            if _unet_skips is not None and layer_idx >= _n_layers // 2:
++                x = x + self.skip_weights[layer_idx - _n_layers // 2] * _unet_skips[_n_layers - 1 - layer_idx]
+             # Apply engram based on variant
+             if self.engram is not None:
+                 if self.config.use_hyper_connections:
+@@ -845,6 +864,8 @@ class GPT(nn.Module):
+                 else:  # "simple" or "minimal"
+                     x = x + self.engram(x, idx)
+             x = block(x, token_ids=idx)
++            if _unet_skips is not None and layer_idx < _n_layers // 2:
++                _unet_skips.append(x)
+ 
+         if self.config.use_hyper_connections:
+             x = x.sum(dim=2)
