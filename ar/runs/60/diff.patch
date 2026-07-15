@@ -1,0 +1,88 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index 52aec55..d079337 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -113,6 +113,7 @@ class GPTConfig(Coqpit):
+     seq_curriculum_steps: int = 0
+     seq_curriculum_len: int = 512
+     warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
++    device_batch_size: int = 32  # per-device batch size (reachable from experiment configs)
+ 
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+diff --git a/bla_gpt/train_ar.py b/bla_gpt/train_ar.py
+index e4bbec2..1e806cc 100644
+--- a/bla_gpt/train_ar.py
++++ b/bla_gpt/train_ar.py
+@@ -171,6 +171,8 @@ class Hyperparameters(Coqpit):
+     learning_rate: float = 0.001
+     warmup_iters: int = 250
+     warmdown_iters: int = 2000  # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule
++    grad_clip: float = 1.0  # gradient clipping max norm (0 = disabled)
++    snapshot_avg_k: int = 0  # if > 0, average last-k val-checkpoint weight snapshots for final eval
+ 
+     # evaluation and logging hyperparams
+     val_loss_every: int = (
+@@ -241,6 +243,9 @@ if __name__ == "__main__":
+ 
+     # convenience variables
+     B, T = args.device_batch_size, args.sequence_length
++    # snapshot averaging buffer
++    _snap_buffer = []  # list of state_dicts collected at val checkpoints
++
+     # calculate the number of steps to take in the val loop.
+     assert args.val_tokens % (B * T * ddp_world_size) == 0
+     val_steps = args.val_tokens // (B * T * ddp_world_size)
+@@ -479,11 +484,26 @@ if __name__ == "__main__":
+             torch.cuda.synchronize()
+             t0 = time.time()
+ 
++        # snapshot averaging: collect state_dict at each val checkpoint (ALL ranks, CPU copies)
++        if args.snapshot_avg_k > 0 and (args.val_loss_every > 0 and step % args.val_loss_every == 0):
++            _snap_buffer.append({k: v.detach().to("cpu", copy=True) for k, v in raw_model.state_dict().items()})
++            if len(_snap_buffer) > args.snapshot_avg_k:
++                _snap_buffer.pop(0)
++
+         # bit confusing: we want to make sure to eval on 0th iteration
+         # but also after the very last iteration. so we loop for step <= num_iterations
+         # instead of just < num_iterations (one extra due to <=), only to do
+         # the validation/sampling one last time, and then we break right here as we're done.
+         if last_step:
++            # snapshot averaging: swap in mean of last-k snapshots for final val (ALL ranks)
++            if args.snapshot_avg_k > 0 and len(_snap_buffer) > 1:
++                avg_sd = {k: v.clone().float() for k, v in _snap_buffer[0].items()}
++                for i in range(1, len(_snap_buffer)):
++                    for key in avg_sd:
++                        avg_sd[key] += _snap_buffer[i][key].float()
++                for key in avg_sd:
++                    avg_sd[key] = (avg_sd[key] / len(_snap_buffer)).to(_snap_buffer[0][key].dtype)
++                raw_model.load_state_dict(avg_sd)
+             break
+ 
+         # --------------- TRAINING SECTION BEGIN -----------------
+@@ -520,6 +540,9 @@ if __name__ == "__main__":
+         for p in model.parameters():
+             if p.grad is not None:
+                 p.grad /= train_accumulation_steps
++        # gradient clipping
++        if args.grad_clip > 0:
++            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+         # step the optimizers (autoresearch: time-based LR, no schedulers)
+         _elapsed_ms = training_time_ms + 1000 * (time.time() - t0)
+         _lrm = ar_lr_mult(step, _elapsed_ms)
+@@ -569,6 +592,15 @@ if __name__ == "__main__":
+             # stop the clock, run final validation
+             torch.cuda.synchronize()
+             training_time_ms += 1000 * (time.time() - t0)
++            # snapshot averaging: swap in mean of last-k snapshots (ALL ranks, clock stopped)
++            if args.snapshot_avg_k > 0 and len(_snap_buffer) > 1:
++                avg_sd = {k: v.clone().float() for k, v in _snap_buffer[0].items()}
++                for i in range(1, len(_snap_buffer)):
++                    for key in avg_sd:
++                        avg_sd[key] += _snap_buffer[i][key].float()
++                for key in avg_sd:
++                    avg_sd[key] = (avg_sd[key] / len(_snap_buffer)).to(_snap_buffer[0][key].dtype)
++                raw_model.load_state_dict(avg_sd)
+             model.eval()
+             val_loader.reset()
+             val_loss = 0.0

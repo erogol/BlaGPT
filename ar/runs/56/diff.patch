@@ -1,0 +1,22 @@
+diff --git a/bla_gpt/train_ar.py b/bla_gpt/train_ar.py
+index e4bbec2..c8dbdef 100644
+--- a/bla_gpt/train_ar.py
++++ b/bla_gpt/train_ar.py
+@@ -171,6 +171,7 @@ class Hyperparameters(Coqpit):
+     learning_rate: float = 0.001
+     warmup_iters: int = 250
+     warmdown_iters: int = 2000  # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule
++    grad_clip: float = 1.0  # gradient clipping max norm (0 = disabled)
+ 
+     # evaluation and logging hyperparams
+     val_loss_every: int = (
+@@ -520,6 +521,9 @@ if __name__ == "__main__":
+         for p in model.parameters():
+             if p.grad is not None:
+                 p.grad /= train_accumulation_steps
++        # gradient clipping
++        if args.grad_clip > 0:
++            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+         # step the optimizers (autoresearch: time-based LR, no schedulers)
+         _elapsed_ms = training_time_ms + 1000 * (time.time() - t0)
+         _lrm = ar_lr_mult(step, _elapsed_ms)

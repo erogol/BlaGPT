@@ -68,12 +68,32 @@ ResFormer (Plus) - [paper](https://arxiv.org/html/2410.17897v5) | [explanation](
 
 Engram (My Simple Variant) - [paper](https://github.com/deepseek-ai/Engram/blob/main/Engram_paper.pdf) | [explanation](./techniques/engram.md) - best_model_loss: `3.2327` -> new_best_model_loss: `3.2296` - peak memory: `50488 MiB` - step_avg: `504.09ms`
 
-Differential Attention v2 - [paper](https://spiky-homegrown-4cb.notion.site/Differential-Transformer-V2-2e7baa052def80ecaa93d4d67d125417) | [explanation](./techniques/diffattnv2.md) - best_model_loss: `3.2296` -> new_best_model_loss: `3.2274` - peak memory: `52829 MiB` - step_avg: `535.16`
+Differential Attention v2 - [paper](https://spiky-homegrown-4cb.notion.site/Differential-Transformer-V2-2e7baa052def80ecaa93d4d67d125417) | [explanation](./techniques/diff_attn_v2.md) - best_model_loss: `3.2296` -> new_best_model_loss: `3.2274` - peak memory: `52829 MiB` - step_avg: `535.16`
 
-👑 Exclusive Self Attention - [paper](https://arxiv.org/html/2603.09078v1) - best_model_loss: `3.2327` -> new_best_model_loss: `3.2303` - train_loss: `3.1987` - peak memory: `49859 MiB` - step_avg: `424.54ms`
+Exclusive Self Attention - [paper](https://arxiv.org/html/2603.09078v1) - best_model_loss: `3.2327` -> new_best_model_loss: `3.2303` - train_loss: `3.1987` - peak memory: `49859 MiB` - step_avg: `424.54ms`
 
 Hyper-Connections - [paper](https://arxiv.org/abs/2409.19606) | [explanation](./techniques/hyper_connections.md) - best_model_loss: `3.2327` -> loss: `3.2741` - train_loss: `3.2388` - peak memory: `68729 MiB` - step_avg: `928.26ms` - did not beat the old best
 
+
+### Auto Research Keeps (cumulative deltas)
+
+Each row below is a greedy delta on top of the previous best stack. `best_model_loss` is the prior stack; `new_best_model_loss` is the prior stack plus the listed change. These are not standalone-vs-vanilla results.
+
+GOAT Sink Prior - [paper](https://arxiv.org/abs/2601.15380) | [explanation](./techniques/goat_sink_prior.md) - best_model_loss: `3.2354` -> new_best_model_loss: `3.2298` - peak memory: `52231 MiB` - step_avg: `377.61ms`
+
+GatedNorm - [paper](https://arxiv.org/abs/2601.22966) | [explanation](./techniques/gated_norm.md) - best_model_loss: `3.2298` -> new_best_model_loss: `3.2230` - peak memory: `50023 MiB` - step_avg: `410.68ms`
+
+HybridNorm - [paper](https://arxiv.org/abs/2503.04598) | [explanation](./techniques/hybrid_norm.md) - best_model_loss: `3.2230` -> new_best_model_loss: `3.2224` - peak memory: `50495 MiB` - step_avg: `474.82ms`
+
+Composable Gated Attention - [paper](https://arxiv.org/abs/2505.06708) | [explanation](./techniques/composable_gated_attention.md) - best_model_loss: `3.2224` -> new_best_model_loss: `3.2128` - peak memory: `58553 MiB` - step_avg: `489.07ms`
+
+Composable Value Residual - [paper](https://arxiv.org/abs/2410.17897) | [explanation](./techniques/value_residual.md) - best_model_loss: `3.2128` -> new_best_model_loss: `3.2011` - peak memory: `58988 MiB` - step_avg: `497.55ms`
+
+U-net Long Skips - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1979` - peak memory: `58632 MiB` - step_avg: `494.31ms`
+
+Learning-rate ×1.4 sweep (F90) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> loss: `3.2014` - peak memory: `58632 MiB` - step_avg: `492.86ms` - did not beat; INVALID/NO-OP because the intended `learning_rate=0.0014` was not applied (logged peak lr `0.001`).
+
+👑 Learning-rate ×1.4 validated and confirmed (F90r/F90r2) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1965` - first run: `3.1972`; independent confirmation: `3.1965` - peak memory: `58632 MiB` - step_avg: `491.00ms` - confirmed keep; active best config uses `learning_rate=0.0014`.
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
@@ -259,6 +279,21 @@ Elbow point learning rate: 1.20e-01
 Plot saved to: logs/lr_finder_blagpt/lr_finder_plot.png
 Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
 ```
+
+
+## Autoresearch checkpoint archive
+
+Latest archived architecture-best checkpoint:
+
+- **Run:** F87c aggregate confirmation (unconfirmed seed-low; F87 architecture result remains `3.1979`)
+- **Validation loss:** `3.1961` at step `5100` (F87c2 confirmation: `3.1987`)
+- **Local checkpoint:** `bla_gpt/logs/ar_full_F87c_0/state_step005100.pt`
+- **Checkpoint:** archived externally (`F87c/state_step005100.pt`)
+- **Size:** `3,039,250,572` bytes
+- **S3 ETag:** `f44e2f6445ea8929cbe3addf349bb16c-363`
+- **Uploaded:** `2026-07-14 08:12:27 UTC`
+
+The current autoresearch ledger is `ar/full_results.tsv`; the active best config is `ar/best_config.json`. The confirmed best result is F90r/F90r2 with learning rate `0.0014` (`3.1972` / `3.1965`).
 
 ## Best Model So Far
 

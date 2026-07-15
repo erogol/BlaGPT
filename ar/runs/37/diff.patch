@@ -1,0 +1,47 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index 52aec55..99311fe 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -113,6 +113,7 @@ class GPTConfig(Coqpit):
+     seq_curriculum_steps: int = 0
+     seq_curriculum_len: int = 512
+     warmup_iters: int = 250  # LR warmup steps (reachable from experiment configs)
++    batch_ramp_steps: int = 0  # first N steps use accumulation=1 (half global batch, 2x optimizer steps/sec)
+ 
+     # Engram: N-gram hash memory lookup
+     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
+diff --git a/bla_gpt/train_ar.py b/bla_gpt/train_ar.py
+index e4bbec2..39f6d44 100644
+--- a/bla_gpt/train_ar.py
++++ b/bla_gpt/train_ar.py
+@@ -494,7 +494,11 @@ if __name__ == "__main__":
+         _cur_steps = getattr(model_config, "seq_curriculum_steps", 0)
+         _cur_len = getattr(model_config, "seq_curriculum_len", 512)
+         _use_short = _cur_steps > 0 and step < _cur_steps
+-        for i in range(1, train_accumulation_steps + 1):
++        # Batch-size ramp (experiment: batch-ramp): accumulation=1 for the
++        # first N steps -> half global batch, twice the optimizer steps/sec.
++        _ramp = getattr(model_config, "batch_ramp_steps", 0)
++        _accum_now = 1 if (_ramp > 0 and step < _ramp) else train_accumulation_steps
++        for i in range(1, _accum_now + 1):
+             # forward pass
+             with ctx:
+                 if _use_short:
+@@ -510,7 +514,7 @@ if __name__ == "__main__":
+             # advance the dataset for the next batch
+             x, y = train_loader.next_batch()
+             # backward pass
+-            if i < train_accumulation_steps:
++            if i < _accum_now:
+                 with (
+                     model.no_sync()
+                 ):  # there's no need to sync gradients every accumulation step
+@@ -519,7 +523,7 @@ if __name__ == "__main__":
+                 loss.backward()  # just sync on the last step
+         for p in model.parameters():
+             if p.grad is not None:
+-                p.grad /= train_accumulation_steps
++                p.grad /= _accum_now
+         # step the optimizers (autoresearch: time-based LR, no schedulers)
+         _elapsed_ms = training_time_ms + 1000 * (time.time() - t0)
+         _lrm = ar_lr_mult(step, _elapsed_ms)

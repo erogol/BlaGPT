@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import sys
 
@@ -177,6 +178,15 @@ class Hyperparameters(Coqpit):
     save_best_model: bool = True  # whether to save best model based on val loss
 
 
+def _apply_json_overrides(args: "Hyperparameters", config_path: str) -> None:
+    """Apply Hyperparameters-matching keys from a JSON config file to args."""
+    with open(config_path) as f:
+        overrides = json.load(f)
+    for key, value in overrides.items():
+        if hasattr(args, key):
+            setattr(args, key, value)
+
+
 # -----------------------------------------------------------------------------
 # int main
 
@@ -202,6 +212,7 @@ if __name__ == "__main__":
 
     if cli_args.config:
         model_config.load_json(cli_args.config)
+        _apply_json_overrides(args, cli_args.config)
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
@@ -453,10 +464,21 @@ if __name__ == "__main__":
 
         # --------------- TRAINING SECTION BEGIN -----------------
         model.train()
+        # Optional sequence-length curriculum from the model recipe. Data and
+        # validation remain unchanged; only early train forwards use a prefix.
+        curriculum_steps = getattr(model_config, "seq_curriculum_steps", 0)
+        curriculum_len = getattr(model_config, "seq_curriculum_len", T)
+        use_short_sequence = curriculum_steps > 0 and step < curriculum_steps
         for i in range(1, train_accumulation_steps + 1):
             # forward pass
             with ctx:
-                _, loss = model(x, y)
+                if use_short_sequence:
+                    _, loss = model(
+                        x[:, :curriculum_len].contiguous(),
+                        y[:, :curriculum_len].contiguous(),
+                    )
+                else:
+                    _, loss = model(x, y)
                 metrics = None
                 if type(loss) is dict:
                     metrics = {k: v for k, v in loss.items() if k != "total"}

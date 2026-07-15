@@ -1,0 +1,38 @@
+diff --git a/bla_gpt/bla_gpt.py b/bla_gpt/bla_gpt.py
+index 524e673..11dcf4a 100644
+--- a/bla_gpt/bla_gpt.py
++++ b/bla_gpt/bla_gpt.py
+@@ -848,11 +848,12 @@ class GPT(nn.Module):
+             _ar_vs = [x]  # v0 = embedding output
+         for layer_idx, block in enumerate(self.transformer.h):
+             if _attn_res:
+-                _V = torch.stack(_ar_vs, dim=0)  # (L, b, t, d)
+-                _K = F.rms_norm(_V, (_V.size(-1),))
+-                _scores = (_K * self.attn_res_w[layer_idx]).sum(-1)  # (L, b, t)
++                _w = self.attn_res_w[layer_idx]
++                _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _ar_vs], dim=0)  # (L, b, t)
+                 _alpha = _scores.softmax(dim=0)
+-                x = (_alpha.unsqueeze(-1) * _V).sum(0)
++                x = _ar_vs[0] * _alpha[0].unsqueeze(-1)
++                for _i in range(1, len(_ar_vs)):
++                    x = x + _ar_vs[_i] * _alpha[_i].unsqueeze(-1)
+             # Apply engram based on variant
+             if self.engram is not None:
+                 if self.config.use_hyper_connections:
+@@ -874,11 +875,12 @@ class GPT(nn.Module):
+                 x = block(x, token_ids=idx)
+ 
+         if _attn_res:
+-            _V = torch.stack(_ar_vs, dim=0)
+-            _K = F.rms_norm(_V, (_V.size(-1),))
+-            _scores = (_K * self.attn_res_w[self.config.n_layer]).sum(-1)
++            _w = self.attn_res_w[self.config.n_layer]
++            _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _ar_vs], dim=0)
+             _alpha = _scores.softmax(dim=0)
+-            x = (_alpha.unsqueeze(-1) * _V).sum(0)
++            x = _ar_vs[0] * _alpha[0].unsqueeze(-1)
++            for _i in range(1, len(_ar_vs)):
++                x = x + _ar_vs[_i] * _alpha[_i].unsqueeze(-1)
+ 
+         if self.config.use_hyper_connections:
+             x = x.sum(dim=2)
