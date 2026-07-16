@@ -116,6 +116,100 @@ class SimplifiedRotary(torch.nn.Module):
 
 
 #
+# GRAPE-A query-gated additive position bias
+# "Group Representational Position Encoding" (Zhang, Chen, Liu, Qin, Yuan,
+# Xu, Gu & Yao, 2025, arXiv:2512.07805). Additive GRAPE, query-gated special
+# case (reference: model-architectures/GRAPE, llama-mha-grape-a-querygated.py):
+#   b_h(i, j) = -(i - j) * softplus(omega_h) * slope_h * softplus(v_h^T q_i / sqrt(D))
+# Replaces RoPE entirely (no rotation applied when enabled). Exact instance of
+# a unipotent GL action, so attention logits depend only on the relative
+# offset; the query gate makes the decay rate content-adaptive (FoX-like).
+#
+
+
+def _softplus_inverse(y: float) -> float:
+    # inverse of softplus for y > 0: x = log(exp(y) - 1)
+    return math.log(math.expm1(y))
+
+
+def _get_alibi_slopes(n_heads: int):
+    """Head-wise geometric slopes as in ALiBi (Press et al., 2022)."""
+
+    def get_slopes_power_of_2(n):
+        start = 2 ** (-(2 ** -(math.log2(n) - 3)))
+        return [start * (start**i) for i in range(n)]
+
+    if math.log2(n_heads).is_integer():
+        return get_slopes_power_of_2(n_heads)
+    closest_power_of_2 = 2 ** math.floor(math.log2(n_heads))
+    slopes = get_slopes_power_of_2(closest_power_of_2)
+    extra = _get_alibi_slopes(2 * closest_power_of_2)
+    slopes += extra[0::2][: n_heads - closest_power_of_2]
+    return slopes
+
+
+class GrapeQueryGatedBias(nn.Module):
+    """Query-gated Additive GRAPE bias, shaped (B, H, T_q, T).
+
+    Expects q in (B, H, T, D) layout (post `_prepare_qkv`). Distance and
+    causal masks are precomputed at `block_size` for torch.compile safety.
+    """
+
+    def __init__(
+        self,
+        n_heads: int,
+        head_dim: int,
+        block_size: int,
+        *,
+        omega_init: float = 1.0,
+        v_init_std: float | None = None,
+        v_l2_norm: bool = True,
+        v_l2_eps: float = 1e-6,
+    ):
+        super().__init__()
+        self.n_heads = n_heads
+        self.head_dim = head_dim
+        self.v_l2_norm = bool(v_l2_norm)
+        self.v_l2_eps = float(v_l2_eps)
+
+        slopes = torch.tensor(_get_alibi_slopes(n_heads), dtype=torch.float32).view(
+            1, n_heads, 1, 1
+        )
+        self.register_buffer("slopes", slopes, persistent=False)
+
+        arange = torch.arange(block_size)
+        dist = (arange.view(-1, 1) - arange.view(1, -1)).clamp_min(0).float()
+        self.register_buffer("dist", dist.view(1, 1, block_size, block_size), persistent=False)
+
+        self.omega = nn.Parameter(torch.empty(n_heads, dtype=torch.float32))
+        self.v = nn.Parameter(torch.empty(n_heads, head_dim, dtype=torch.float32))
+
+        omega_init = max(float(omega_init), 1e-8)
+        with torch.no_grad():
+            # omega parameterized via softplus so omega_h >= 0 (monotonic penalty)
+            self.omega.fill_(_softplus_inverse(omega_init))
+            if v_init_std is None:
+                v_init_std = 1.0 / math.sqrt(head_dim)
+            self.v.normal_(mean=0.0, std=float(v_init_std))
+
+    def forward(self, q):
+        # q: (B, H, T_q, D); returns float32 bias (B, H, T_q, T_q)
+        B, H, T, D = q.shape
+        dist = self.dist[:, :, :T, :T]  # (1, 1, T, T)
+        omega = F.softplus(self.omega).view(1, H, 1, 1) * self.slopes  # (1, H, 1, 1)
+
+        v = self.v
+        if self.v_l2_norm:
+            v = v / v.norm(dim=-1, keepdim=True).clamp_min(self.v_l2_eps)
+
+        # gate[b, h, t] = softplus(v_h^T q_{b,h,t,:} / sqrt(D)) >= 0
+        gate_logits = (q.float() * v.view(1, H, 1, D)).sum(dim=-1) / math.sqrt(D)
+        gate = F.softplus(gate_logits)  # (B, H, T)
+
+        return -dist * omega * gate.unsqueeze(-1)  # (B, H, T, T)
+
+
+#
 # Base Attention Module
 #
 
@@ -161,6 +255,16 @@ class Attention(nn.Module):
                 torch.zeros(2 * config.block_size - 1, self.head_dim)
             )
             nn.init.normal_(self.rel_pos_emb, std=0.02)
+        elif config.pos_encoding == "grape_a_qgate":
+            # GRAPE-A query-gated additive bias (arXiv:2512.07805); replaces RoPE
+            self.grape_bias = GrapeQueryGatedBias(
+                self.n_head,
+                self.head_dim,
+                config.block_size,
+                omega_init=getattr(config, "grape_omega_init", 1.0),
+                v_init_std=getattr(config, "grape_v_init_std", None),
+                v_l2_norm=getattr(config, "grape_v_l2_norm", True),
+            )
         elif config.pos_encoding == "none" or config.pos_encoding is None:
             pass
         else:
@@ -303,7 +407,25 @@ class Attention(nn.Module):
 
         return q, k, v
 
+    def _grape_attn_mask(self, q, T_q, T):
+        """Combined causal + GRAPE-A additive float mask for SDPA."""
+        bias = self.grape_bias(q).to(q.dtype)  # (B, H, T_q, T)
+        causal = torch.triu(
+            torch.ones(T_q, T, dtype=torch.bool, device=q.device), diagonal=1
+        )
+        return bias.masked_fill(causal[None, None], float("-inf"))
+
     def _flash_attention(self, q, k, v):
+        if hasattr(self, "grape_bias"):
+            T_q, T = q.size(2), k.size(2)
+            return torch.nn.functional.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=self._grape_attn_mask(q, T_q, T),
+                dropout_p=self.dropout if self.training else 0,
+                is_causal=False,
+            )
         return torch.nn.functional.scaled_dot_product_attention(
             q,
             k,
@@ -320,6 +442,8 @@ class Attention(nn.Module):
             ).view(1, 1, T_q, T)
 
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        if hasattr(self, "grape_bias"):
+            att = att + self.grape_bias(q).to(att.dtype)
         if self.soft_cap > 0:
             att = soft_cap(att, self.soft_cap)
 
@@ -381,6 +505,9 @@ class GOATSinkAttention(ExclusiveSelfAttention):
         causal = torch.triu(torch.ones(T_q, T, dtype=torch.bool, device=q.device), diagonal=1)
         mask.masked_fill_(causal[None, None], float("-inf"))
         mask[:, :, :, 0] = mask[:, :, :, 0] + self.sink_prior[None, :, None]
+        if hasattr(self, "grape_bias"):
+            # GRAPE-A query-gated additive bias composes with the sink prior
+            mask = mask + self.grape_bias(q).to(q.dtype)
         y = torch.nn.functional.scaled_dot_product_attention(
             q, k, v,
             attn_mask=mask,
@@ -395,6 +522,8 @@ class GOATSinkAttention(ExclusiveSelfAttention):
                 torch.ones(T_q, T, dtype=torch.bool, device=q.device)
             ).view(1, 1, T_q, T)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        if hasattr(self, "grape_bias"):
+            att = att + self.grape_bias(q).to(att.dtype)
         if self.soft_cap > 0:
             att = soft_cap(att, self.soft_cap)
         att[:, :, :, 0] = att[:, :, :, 0] + self.sink_prior[None, :, None]

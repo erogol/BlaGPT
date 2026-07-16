@@ -73,6 +73,11 @@ class GPTConfig(Coqpit):
     use_pre_post_norm: bool = False  # from Qwen, for better training stability
     rope_theta: float = 10000  # 1000000.0 in llama3 models
     rope_variant: str = "standard"  # Options: "standard" (2D rotations) or "simplified" (concatenation)
+    # GRAPE-A query-gated additive position bias (arXiv:2512.07805),
+    # active only when pos_encoding == "grape_a_qgate" (replaces RoPE)
+    grape_omega_init: float = 1.0  # initial per-head decay rate (softplus-parameterized)
+    grape_v_init_std: float = None  # gate vector init std; None => 1/sqrt(head_dim)
+    grape_v_l2_norm: bool = True  # L2-normalize the gate vector v_h
     use_per_token_output_bias: bool = (
         False  # use an embedding layer to add a bias to each token prediction
     )
