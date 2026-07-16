@@ -97,3 +97,4 @@ n	commit	parent	val_loss	delta_best	vram_mb	steps	tok_M	status	idea	note
 70	08389e3	08389e3	3.387902	0.004257	50999	2216	1161.8	discard	mlp_expand12	curve turned: 4/6/8/10/12 = 3.4103/3.3962/3.3909/3.3836/3.3879. optimum expand=10. chain closed 5pts 2 keeps
 71	08389e3	08389e3	3.377524	-0.006121	46411	2473	1296.6	rerun?	n_layer10_wide_mlp	depth rebalance on wide MLP: 10 layers +138 steps -14M params, beats by 0.0061 (borderline). confirming
 71b	08389e3	08389e3	3.375010	-0.008635	46411	2486	1303.4	keep	n_layer10_wide_mlp_confirm	CONFIRMED: both runs beat 3.3836 (3.3775/3.3750). NEW BEST 3.3750. 10 layers + wider MLP improves depth/width balance; confirmed transferable architecture change [class=ARCH]
+F94	0af8e22	0af8e22	3.189700	-0.006800	59643	5100	2684.2	keep	grape_a_qgate	GRAPE-A query-gated additive pos encoding (arXiv:2512.07805) replaces RoPE; beats F90r2=3.1965 by 0.0068. NEW BEST. [class=ARCH]
