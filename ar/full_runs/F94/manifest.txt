@@ -1,0 +1,6 @@
+started_utc=2026-07-16T15:33:59Z
+git_commit=0af8e22be838c6664f259b723930eab1cb606276
+run_name=ar_full_F94
+config=/nvme/BlaGPT/ar/full_runs/F94/config.json
+exit_code=0
+checkpoint_dir=/nvme/BlaGPT/bla_gpt/logs/ar_full_F94_0

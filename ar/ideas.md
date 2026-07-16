@@ -369,3 +369,12 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Risk note: replaces the flash causal fast-path with an explicit (B,H,T,T) float mask — expect step-time overhead similar to GOAT-sink's masked path; full runs are step-budgeted (5100), so this costs wall-clock, not tokens.
 - Class if kept: ARCH (positional-encoding mechanism; transferable).
 - Launch: BLOCKED as of 2026-07-16 — erogol-run pod no longer exists; F92/F93 on-pod state not on GitHub (ledger ends at F90r2). Needs pod recreation + data restore before the 5100-step run.
+
+## F94 result — GRAPE-A query-gated positional bias (2026-07-16)
+- Full run: val_loss 3.1897, peak memory 59643 MiB, step_avg 580.32ms, 5100 steps, exit_code 0.
+- Candidate: Additive GRAPE query-gated positional encoding (arXiv:2512.07805) replacing RoPE, on F90r2 best config (lr 0.0014, xsa + goat sink + composable gated).
+- Verdict: KEEP. Beats F90r2=3.1965 by 0.0068. New best. Note: F92 (3.1925, previous best) was lost with the old pod and not in GitHub ledger; F94 directly supersedes F90r2 as the trusted best.
+- best_config updated to F94 config (pos_encoding=grape_a_qgate).
+- Class: ARCH (positional-encoding mechanism; transferable).
+- Step time 580ms vs F90r2 491ms (+18% overhead from explicit float attn_mask, as expected). Acceptable for the quality gain.
+- Next action: confirm F94 with a second independent run (F94c) to verify the improvement is above seed noise.
