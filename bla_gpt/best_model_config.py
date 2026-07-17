@@ -142,8 +142,8 @@ class BestConfig(GPTConfig):
     # TOP (off but configured)
     top_force_optimized: bool = True
 
-    # Learning rate override (F90r2: 1.4x default)
-    learning_rate: float = 0.0014
+    # Learning rate override (F99: Aurora eta)
+    learning_rate: float = 0.03
 
     """About z-loss: instability occurs
     when the logits diverge and become very negative, as
@@ -158,13 +158,14 @@ class BestConfig(GPTConfig):
 
     # optimizer - overriding Hyperparameters
     optimizer_name: str = (
-        "Muon"  # check get_optimizer() in bla_gpt/optimizers/__init__.py
+        "Aurora"  # check get_optimizer() in bla_gpt/optimizers/__init__.py
     )
     optimizer_args: dict = field(
         default_factory=lambda: {
-            "betas": (0.9, 0.95),
-            "eps": 1e-8,
-            "weight_decay": 0.0,
-            "use_cautious_weight_decay": False,
+            "weight_decay": 0.025,
+            "mu": 0.95,
+            "nesterov": True,
+            "pp_iterations": 2,
+            "pp_beta": 0.5,
         }
     )
