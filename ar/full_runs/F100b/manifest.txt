@@ -1,0 +1,6 @@
+started_utc=2026-07-17T11:30:05Z
+git_commit=ea8784fb5db8cb4a830b935ccdcbe807c3a0f3a3
+run_name=ar_full_F100b
+config=/nvme/BlaGPT/ar/full_runs/F100b/config.json
+exit_code=0
+checkpoint_dir=/nvme/BlaGPT/bla_gpt/logs/ar_full_F100b_0
