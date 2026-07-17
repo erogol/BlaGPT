@@ -13,6 +13,7 @@ This directory tries to explain various techniques implemented in this repositor
 - [**Composable Gated Attention**](./composable_gated_attention.md) - Gated Attention composed on top of XSA + GOAT sink prior
 - [**Exclusive Self Attention**](./exclusive_self_attention.md) - Removes the value-direction component from attention outputs
 - [**GOAT Sink Prior**](./goat_sink_prior.md) - Per-head key-0 attention log-prior for learned sink control
+- [**GRAPE-A Query-Gated**](./grape_a_qgate.md) - Query-gated additive position bias replacing RoPE with learned content-dependent decay
 - [**Key-Dimension Attention (KDA)**](./kda.md) - Linear-complexity attention with fine-grained gating and delta rule
 
 ## Normalization
@@ -29,4 +30,5 @@ This directory tries to explain various techniques implemented in this repositor
 ## Optimizers
 - [**AdaMuon**](./adamuon.md) - Adaptive Muon optimizer with second-moment estimation
 - [**NorMuon**](./normuon.md) - Normalized Muon optimizer with norm-preserving adaptive scaling
+- [**Aurora**](./aurora.md) - Leverage-aware spectral optimizer (Muon-family); current best optimizer (F99)
 - [**Cautious Weight Decay**](./cautious_weight_decay.md) - Selective weight decay based on momentum-parameter sign alignment

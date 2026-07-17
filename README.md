@@ -95,7 +95,8 @@ Learning-rate ×1.4 sweep (F90) - [Muon source](https://kellerjordan.github.io/p
 
 Learning-rate ×1.4 validated and confirmed (F90r/F90r2) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1965` - first run: `3.1972`; independent confirmation: `3.1965` - peak memory: `58632 MiB` - step_avg: `491.00ms` - confirmed keep; active best config uses `learning_rate=0.0014`.
 
-👑 GRAPE-A Query-Gated Positional Encoding (F94) - [paper](https://arxiv.org/abs/2512.07805) | [explanation](./techniques/grape_a_qgate.md) - best_model_loss: `3.1965` -> new_best_model_loss: `3.1897` - peak memory: `59643 MiB` - step_avg: `580.32ms` - replaces RoPE with query-gated additive position bias; confirmed keep; active best config uses `pos_encoding="grape_a_qgate"`.
+👑 Aurora Optimizer (F99) - [paper](https://arxiv.org/abs/2606.27715) | [explanation](./techniques/aurora.md) - best_model_loss: `3.1897` -> new_best_model_loss: `3.1603` - peak memory: `59643 MiB` - step_avg: `721.25ms` - replaces Muon with leverage-aware spectral updates at `learning_rate=0.03`; clean keep; active best config uses `optimizer_name="Aurora"`.
+
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
@@ -157,6 +158,8 @@ MARS - [link](https://github.com/AGI-Arena/MARS) - loss: `3.3459`, peak VRAM: 40
 Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak VRAM: `40332MB`, step_time: `620.24ms`
 
 AdaMuon - [paper](https://arxiv.org/abs/2507.11005) | [explanation](./techniques/adamuon.md) - Adaptive Muon with second-moment estimation (default optimizer)
+
+Aurora - [paper](https://arxiv.org/abs/2606.27715) | vendored from [tilde-research/aurora-release](https://github.com/tilde-research/aurora-release) - leverage-aware spectral optimizer (Muon-style hybrid: 2D matrices via Aurora, rest via AdamW). On the best config stack with `lr=0.03, weight_decay=0.025`: loss: `3.1965` -> `3.1603` - new best (run F99) - peak VRAM: `59643 MiB`, step_time: `721ms`
 
 BiClip - [link](https://arxiv.org/pdf/2502.04164) - (not working well) loss: `7.2292`, peak VRAM: `39751 MiB`, step_time: `510ms`
 
