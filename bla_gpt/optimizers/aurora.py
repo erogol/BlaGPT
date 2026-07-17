@@ -51,6 +51,7 @@ def aurora(
     pp_iterations=2,
     pp_beta=0.5,
     eps=1e-7,
+    rms_match=False,
 ):
     """Aurora update rule. Vendored from aurora-release/src/aurora.py.
 
@@ -100,8 +101,14 @@ def aurora(
                 row_sq = U.to(torch.float32).pow(2).sum(dim=-1, keepdim=True).clamp_(min=eps * eps)
                 D = D * (target_row_sq / row_sq).pow(pp_beta)
         update = U.mT if transposed else U
-    # Spectral aspect-ratio scaling (Muon convention).
-    update *= max(1, G.size(-2) / G.size(-1)) ** 0.5
+    if rms_match:
+        # Kimi-style RMS matching (arXiv:2502.16982): scale the polar update so its
+        # entry-wise RMS is ~0.2 for every matrix shape (matches AdamW's typical
+        # update RMS, makes one global lr work across layers of different widths).
+        update *= 0.2 * (max(G.size(-2), G.size(-1)) ** 0.5)
+    else:
+        # Spectral aspect-ratio scaling (Muon convention). Bit-identical to F99.
+        update *= max(1, G.size(-2) / G.size(-1)) ** 0.5
     if not update.isfinite().all():
         raise RuntimeError(
             f"aurora produced non-finite update for parameter of shape {tuple(W.shape)}. "
@@ -146,6 +153,7 @@ class Aurora(torch.optim.Optimizer):
         pp_iterations=2,
         pp_beta=0.5,
         eps=1e-7,
+        rms_match=False,
         betas=(0.9, 0.95),
         adamw_eps=1e-8,
         adamw_wd=0.0,
@@ -159,6 +167,7 @@ class Aurora(torch.optim.Optimizer):
             pp_iterations=pp_iterations,
             pp_beta=pp_beta,
             eps=eps,
+            rms_match=rms_match,
             adamw_betas=betas,
             adamw_eps=adamw_eps,
             adamw_wd=adamw_wd,
@@ -209,6 +218,7 @@ class Aurora(torch.optim.Optimizer):
                     pp_iterations=group["pp_iterations"],
                     pp_beta=group["pp_beta"],
                     eps=group["eps"],
+                    rms_match=group["rms_match"],
                 )
 
             ############################

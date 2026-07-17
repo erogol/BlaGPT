@@ -77,6 +77,14 @@ class Muon(torch.optim.Optimizer):
         use_cautious_weight_decay=False,
         **kwargs,
     ):
+        # Accept config-style "weight_decay" as an alias for wd, and reject any
+        # other unknown kwargs. Previously **kwargs silently swallowed them, so
+        # configs setting "weight_decay" had NO effect and the wd=0.1 default
+        # was always used (all Muon ledger runs through F94 trained with wd=0.1).
+        if "weight_decay" in kwargs:
+            wd = kwargs.pop("weight_decay")
+        if kwargs:
+            raise ValueError(f"Muon got unknown kwargs: {sorted(kwargs)}")
 
         defaults = dict(
             lr=lr,
@@ -172,14 +180,14 @@ class Muon(torch.optim.Optimizer):
                         # Reshape param to match momentum buffer
                         p_view = p.data.view(momentum_buf.shape)
                         mask = (momentum_buf * p_view >= 0).float()
-                        p_view.mul_(1 - adjusted_lr * wd * mask)
+                        p_view.mul_(1 - lr * wd * mask)
                     else:
                         # No reshaping needed
                         mask = (momentum_buf * p.data >= 0).float()
-                        p.data.mul_(1 - adjusted_lr * wd * mask)
+                        p.data.mul_(1 - lr * wd * mask)
                 else:
                     # Standard decoupled weight decay
-                    p.data.mul_(1 - lr * wd) # not sure if this line should use adjusted_lr or lr. But lr works better in practice.
+                    p.data.mul_(1 - lr * wd)  # Kimi form (arXiv:2502.16982): W -= lr*(scaled_update + wd*W); decay uses plain lr
 
                 # apply update
                 p.data.add_(u.view(original_shape), alpha=-adjusted_lr)
