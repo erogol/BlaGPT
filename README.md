@@ -95,6 +95,8 @@ Learning-rate ×1.4 sweep (F90) - [Muon source](https://kellerjordan.github.io/p
 
 Learning-rate ×1.4 validated and confirmed (F90r/F90r2) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1965` - first run: `3.1972`; independent confirmation: `3.1965` - peak memory: `58632 MiB` - step_avg: `491.00ms` - confirmed keep; active best config uses `learning_rate=0.0014`.
 
+GRAPE-A Query-Gated Positional Encoding (F94) - [paper](https://arxiv.org/abs/2512.07805) | [explanation](./techniques/grape_a_qgate.md) - best_model_loss: `3.1965` -> new_best_model_loss: `3.1897` - peak memory: `59643 MiB` - step_avg: `580.32ms` - replaces RoPE with query-gated additive position bias; confirmed keep; active best config uses `pos_encoding="grape_a_qgate"`.
+
 👑 Aurora Optimizer (F99) - [paper](https://arxiv.org/abs/2606.27715) | [explanation](./techniques/aurora.md) - best_model_loss: `3.1897` -> new_best_model_loss: `3.1603` - peak memory: `59643 MiB` - step_avg: `721.25ms` - replaces Muon with leverage-aware spectral updates at `learning_rate=0.03`; clean keep; active best config uses `optimizer_name="Aurora"`.
 
 
@@ -298,7 +300,7 @@ Latest archived architecture-best checkpoint:
 - **S3 ETag:** `f44e2f6445ea8929cbe3addf349bb16c-363`
 - **Uploaded:** `2026-07-14 08:12:27 UTC`
 
-The current autoresearch ledger is `ar/results.tsv`; the active best config is `ar/best_config.json`. The confirmed best result is F94 with GRAPE-A query-gated positional encoding (`3.1897`), superseding F90r2 (`3.1965`).
+The current autoresearch ledger is `ar/results.tsv`; the active best config is `ar/best_config.json`. The confirmed best result is F99 with the Aurora optimizer (`3.1603`), superseding F94 GRAPE-A (`3.1897`).
 
 ## Best Model So Far
 
