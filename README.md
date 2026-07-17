@@ -158,6 +158,8 @@ Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak
 
 AdaMuon - [paper](https://arxiv.org/abs/2507.11005) | [explanation](./techniques/adamuon.md) - Adaptive Muon with second-moment estimation (default optimizer)
 
+Aurora - [paper](https://arxiv.org/abs/2606.27715) | vendored from [tilde-research/aurora-release](https://github.com/tilde-research/aurora-release) - leverage-aware spectral optimizer (Muon-style hybrid: 2D matrices via Aurora, rest via AdamW). On the best config stack with `lr=0.03, weight_decay=0.025`: loss: `3.1965` -> `3.1603` - new best (run F99) - peak VRAM: `59643 MiB`, step_time: `721ms`
+
 BiClip - [link](https://arxiv.org/pdf/2502.04164) - (not working well) loss: `7.2292`, peak VRAM: `39751 MiB`, step_time: `510ms`
 
 NorMuon - [paper](https://arxiv.org/html/2510.05491v1) | [explanation](./techniques/normuon.md) - best_model_loss: `3.2411` -> loss: `3.4630`, peak VRAM: `44154 MiB`, step_time: `387.46 ms`
