@@ -30,4 +30,5 @@ This directory tries to explain various techniques implemented in this repositor
 ## Optimizers
 - [**AdaMuon**](./adamuon.md) - Adaptive Muon optimizer with second-moment estimation
 - [**NorMuon**](./normuon.md) - Normalized Muon optimizer with norm-preserving adaptive scaling
+- [**Aurora**](./aurora.md) - Leverage-aware spectral optimizer (Muon-family); current best optimizer (F99)
 - [**Cautious Weight Decay**](./cautious_weight_decay.md) - Selective weight decay based on momentum-parameter sign alignment
