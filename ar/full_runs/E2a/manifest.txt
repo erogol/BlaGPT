@@ -1,0 +1,6 @@
+started_utc=2026-09-29T10:46:21Z
+git_commit=142e376b509261a5b77bba475b846f3cf3114a29
+run_name=ar_full_E2a
+config=ar/full_runs/E2a/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_E2a_0

@@ -130,6 +130,44 @@ class DistributedDataLoader:
         return x.cuda(), y.cuda()
 
 
+class WeightEMA:
+    """Trailing exponential moving average of a model's floating-point weights.
+
+    Used only when ema_last_steps > 0. Update once per training step.
+    At validation: call apply_to(model), evaluate, then call restore(model).
+    """
+
+    def __init__(self, model, decay: float):
+        self.decay = decay
+        self.shadow = {
+            name: p.detach().clone()
+            for name, p in model.state_dict().items()
+            if p.is_floating_point()
+        }
+        self.backup = None
+
+    @torch.no_grad()
+    def update(self, model):
+        for name, p in model.state_dict().items():
+            shadow_p = self.shadow.get(name)
+            if shadow_p is not None:
+                shadow_p.mul_(self.decay).add_(p.detach(), alpha=1.0 - self.decay)
+
+    @torch.no_grad()
+    def apply_to(self, model):
+        self.backup = {
+            name: p.detach().clone()
+            for name, p in model.state_dict().items()
+            if name in self.shadow
+        }
+        model.load_state_dict(self.shadow, strict=False)
+
+    @torch.no_grad()
+    def restore(self, model):
+        model.load_state_dict(self.backup, strict=False)
+        self.backup = None
+
+
 # -----------------------------------------------------------------------------
 # Hyperparameters
 
@@ -163,6 +201,10 @@ class Hyperparameters(Coqpit):
     learning_rate: float = 0.001
     warmup_iters: int = 250
     warmdown_iters: int = 2000  # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule
+    final_lr_frac: float = 0.0  # warmdown floor as a fraction of peak lr; 0.0 = decay to zero (unchanged behavior)
+
+    # weight EMA (trailing average of the last N steps, used at validation)
+    ema_last_steps: int = 0  # 0 = disabled (unchanged behavior); e.g. 300 -> decay = 1 - 1/300
 
     # evaluation and logging hyperparams
     val_loss_every: int = (
@@ -306,12 +348,17 @@ if __name__ == "__main__":
         # 2) constant lr for a while
         elif it < args.num_iterations - args.warmdown_iters:
             return 1.0
-        # 3) linear warmdown
+        # 3) linear warmdown, floored at final_lr_frac * peak_lr
         else:
             decay_ratio = (args.num_iterations - it) / args.warmdown_iters
-            return decay_ratio
+            return args.final_lr_frac + (1.0 - args.final_lr_frac) * decay_ratio
 
     schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]
+
+    # weight EMA over the last ema_last_steps training steps (off by default)
+    ema = None
+    if args.ema_last_steps > 0:
+        ema = WeightEMA(raw_model, decay=1.0 - 1.0 / args.ema_last_steps)
 
     # begin logging
     if master_process:
@@ -375,6 +422,8 @@ if __name__ == "__main__":
             model.eval()
             val_loader.reset()
             val_loss = 0.0
+            if ema is not None:
+                ema.apply_to(raw_model)
             with torch.no_grad():
                 for _ in range(val_steps):
                     x_val, y_val = val_loader.next_batch()
@@ -388,6 +437,8 @@ if __name__ == "__main__":
                         del loss
             dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
             val_loss /= val_steps
+            if ema is not None:
+                ema.restore(raw_model)
             # log val loss to console and to logfile
             if master_process:
                 if metrics is None:
@@ -504,6 +555,8 @@ if __name__ == "__main__":
             sched.step()
         # null the gradients
         model.zero_grad(set_to_none=True)
+        if ema is not None:
+            ema.update(raw_model)
         # --------------- TRAINING SECTION END -------------------
         # everything that follows now is just diagnostics, prints, logging, etc.
 
