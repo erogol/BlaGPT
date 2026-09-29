@@ -99,6 +99,8 @@ GRAPE-A Query-Gated Positional Encoding (F94) - [paper](https://arxiv.org/abs/25
 
 👑 Aurora Optimizer (F99) - [paper](https://arxiv.org/abs/2606.27715) | [explanation](./techniques/aurora.md) - best_model_loss: `3.1897` -> new_best_model_loss: `3.1603` - peak memory: `59643 MiB` - step_avg: `721.25ms` - replaces Muon with leverage-aware spectral updates at `learning_rate=0.03`; clean keep; active best config uses `optimizer_name="Aurora"`.
 
+Weight EMA + LR floor (E1c) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1487` - peak memory: `61239 MiB` - step_avg: `731.65ms` - warmdown floors at 0.15x peak lr (`final_lr_frac=0.15`) plus a trailing weight EMA over the last 300 steps used at eval (`ema_last_steps=300`); clean keep; active best config uses `final_lr_frac=0.15`, `ema_last_steps=300`.
+
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`

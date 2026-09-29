@@ -93,5 +93,7 @@
   "z_loss_weight": 0.0,
   "zero_init_proj_layers": true,
   "grape_omega_init": 1.0,
-  "grape_v_l2_norm": true
+  "grape_v_l2_norm": true,
+  "final_lr_frac": 0.15,
+  "ema_last_steps": 300
 }
