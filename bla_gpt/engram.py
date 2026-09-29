@@ -445,6 +445,57 @@ class NgramLambdaEngram(nn.Module):
 # Even simpler: Minimal Engram (< 50 lines of core logic)
 # ============================================================================
 
+def build_token_norm_map(vocab_size: int, tokenizer_name: str = "gpt2") -> torch.Tensor:
+    """
+    Build a token -> normalization-class map for n-gram hashing (PR #375 style).
+
+    Tokens sharing the same normalization class share n-gram table rows,
+    which reduces hash collisions for semantically-similar BPE variants of
+    the same underlying text.
+
+    Rules:
+      - Token ids 0-255 (raw single bytes in GPT-2 BPE) each keep their own
+        unique class (no grouping).
+      - Token ids >= 256 are grouped by their first 2 decoded bytes: tokens
+        with the same 2-byte prefix share a class id.
+      - Any token whose bytes can't be decoded, or that decodes to fewer
+        than 2 bytes (and isn't a raw single byte itself), gets its own
+        unique class id (no grouping), so odd/special tokens never break.
+
+    Args:
+        vocab_size: Size of the model's vocabulary (may exceed the
+            tokenizer's real vocab, e.g. GPT-2's 50257 padded to 50304).
+        tokenizer_name: tiktoken encoding name (default: "gpt2").
+
+    Returns:
+        torch.long tensor of shape (vocab_size,), token id -> class id.
+    """
+    import tiktoken
+
+    enc = tiktoken.get_encoding(tokenizer_name)
+
+    norm_map = torch.arange(vocab_size, dtype=torch.long)
+    next_class_id = vocab_size  # unused ids above 255 get fresh classes from here
+    prefix_to_class: dict[bytes, int] = {}
+
+    for token_id in range(256, vocab_size):
+        try:
+            token_bytes = enc.decode_single_token_bytes(token_id)
+        except Exception:
+            token_bytes = None
+
+        if token_bytes is None or len(token_bytes) < 2:
+            continue  # keep its own unique class id (already set by torch.arange)
+
+        prefix = token_bytes[:2]
+        if prefix not in prefix_to_class:
+            prefix_to_class[prefix] = next_class_id
+            next_class_id += 1
+        norm_map[token_id] = prefix_to_class[prefix]
+
+    return norm_map
+
+
 class MinimalEngram(nn.Module):
     """
     Bare-bones Engram in ~40 lines.
@@ -459,6 +510,10 @@ class MinimalEngram(nn.Module):
         shared_embedding: Optional shared embedding table. If provided, uses this
             instead of creating a new embedding table. Useful for sharing embeddings
             across multiple layers to reduce memory footprint.
+        vocab_size: Tokenizer vocabulary size. Required when normalize_tokens=True.
+        normalize_tokens: If True, map token ids through a normalization class
+            before hashing (PR #375 style), so semantically-similar BPE token
+            variants share n-gram table rows. Default off (unchanged behavior).
     """
 
     def __init__(
@@ -468,10 +523,13 @@ class MinimalEngram(nn.Module):
         ngram: int = 3,
         pad_id: int = 0,
         shared_embedding: Optional[nn.Embedding] = None,
+        vocab_size: Optional[int] = None,
+        normalize_tokens: bool = False,
     ):
         super().__init__()
         self.ngram = ngram
         self.pad_id = pad_id
+        self.normalize_tokens = normalize_tokens
 
         # Use shared embedding if provided, else create own
         if shared_embedding is not None:
@@ -490,9 +548,19 @@ class MinimalEngram(nn.Module):
             torch.randint(1, 2**62, (ngram,), dtype=torch.long) | 1
         )
 
+        if normalize_tokens:
+            if vocab_size is None:
+                raise ValueError(
+                    "MinimalEngram(normalize_tokens=True) requires vocab_size to be set"
+                )
+            self.register_buffer("norm_map", build_token_norm_map(vocab_size))
+
     def forward(self, hidden_states: torch.Tensor, input_ids: torch.Tensor):
         B, L = input_ids.shape
         device = input_ids.device
+
+        if self.normalize_tokens:
+            input_ids = self.norm_map[input_ids]
 
         # Hash N-gram at each position
         h = torch.zeros(B, L, dtype=torch.long, device=device)
@@ -520,6 +588,7 @@ def create_engram(
     num_layers: int,
     ngram: int = 3,
     vocab_mult: int = 5,
+    normalize_tokens: bool = False,
 ) -> nn.Module:
     """
     Factory function to create an Engram module.
@@ -531,6 +600,8 @@ def create_engram(
         num_layers: Number of transformer layers (used by ngram_lambda)
         ngram: N-gram size (default: 3)
         vocab_mult: Hash table size multiplier (default: 5)
+        normalize_tokens: For "minimal" variant only: normalize tokens to a
+            shared class before n-gram hashing (PR #375 style). Default off.
 
     Returns:
         Engram module instance
@@ -555,6 +626,8 @@ def create_engram(
             hidden_size=hidden_size,
             table_size=vocab_mult * vocab_size,
             ngram=ngram,
+            vocab_size=vocab_size,
+            normalize_tokens=normalize_tokens,
         )
     else:
         raise ValueError(f"Unknown engram variant: {variant}")

@@ -144,6 +144,7 @@ class GPTConfig(Coqpit):
     engram_ngram: int = 3  # N-gram size (2=bigrams, 3=trigrams, etc.)
     engram_vocab_mult: int = 5  # Hash table size multiplier (table_size = mult * vocab_size)
     engram_share_embedding: bool = True  # Share embedding across layers
+    engram_normalize_tokens: bool = False  # Normalize tokens to a shared class before n-gram hashing (PR #375 style), reduces hash collisions
 
     # Dilated attention parameters
     segment_sizes: list[int] = field(default_factory=lambda: [64, 128, 256, 512, 1024])
@@ -768,6 +769,7 @@ class GPT(nn.Module):
                 num_layers=config.n_layer,
                 ngram=config.engram_ngram,
                 vocab_mult=config.engram_vocab_mult,
+                normalize_tokens=config.engram_normalize_tokens,
             )
 
         # U-net long skips (F87): one learnable scalar per encoder/decoder pair
