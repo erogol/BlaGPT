@@ -1,0 +1,6 @@
+started_utc=2026-09-29T16:55:31Z
+git_commit=62d74b4f62c949f043eccbd41cd5bc4f850b2858
+run_name=ar_full_E2a_confirm
+config=ar/full_runs/E2a_confirm/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_E2a_confirm_0
