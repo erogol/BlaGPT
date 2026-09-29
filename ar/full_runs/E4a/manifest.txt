@@ -1,0 +1,6 @@
+started_utc=2026-09-29T18:36:39Z
+git_commit=2ba8109a37c21e364f64828369ac5345725d6085
+run_name=ar_full_E4a
+config=ar/full_runs/E4a/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_E4a_0

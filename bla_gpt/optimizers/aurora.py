@@ -8,6 +8,12 @@ update rule reproduces upstream exactly. `Aurora` wraps them in a
 `torch.optim.Optimizer` that mirrors this repo's Muon integration: 2D matrix
 parameters are updated by Aurora, while 1D parameters and the embedding / head
 matrices fall back to an internal AdamW (identical to `optimizers/muon.py`).
+
+Optional experimental extension (E4a, off by default): a second "slow"
+momentum rail (`aurora_twin_rail`) inspired by ANVIL2's twin-rail velocity.
+When enabled, a slow EMA of the gradient is blended into the fast-rail
+momentum after `rail_engage_step` steps. When disabled, behavior is
+byte-identical to the vendored implementation above.
 """
 
 import torch
@@ -52,11 +58,22 @@ def aurora(
     pp_beta=0.5,
     eps=1e-7,
     rms_match=False,
+    twin_rail=False,
+    momentum_slow=None,
+    slow_beta=0.98,
+    step=0,
+    rail_engage_step=514,
+    rail_fast_weight=0.4385,
 ):
     """Aurora update rule. Vendored from aurora-release/src/aurora.py.
 
     Mutates ``W`` (weight) in place; ``G`` (gradient) and ``momentum`` are the
     caller-managed grad and momentum buffers.
+
+    Optional twin-rail mode (E4a, off by default when ``twin_rail=False``):
+    when enabled, ``momentum_slow`` is an additional caller-managed EMA buffer
+    (beta=``slow_beta``) that gets blended into the fast rail with weight
+    ``rail_fast_weight`` once ``step >= rail_engage_step``.
     """
     if W.ndim != 2:
         raise ValueError(f"aurora expects 2D weight tensors, got shape {tuple(W.shape)}")
@@ -75,10 +92,23 @@ def aurora(
     if pp_beta <= 0.0:
         raise ValueError(f"pp_beta must be positive, got {pp_beta}")
 
-    # SGD-momentum (Nesterov by default).
+    # SGD-momentum (Nesterov by default). Fast rail, always updated.
     momentum.lerp_(G, 1 - mu)
-    # Clone when not using Nesterov to avoid scaling the momentum buffer in-place below.
-    update = G.lerp_(momentum, mu) if nesterov else momentum.clone()
+    if twin_rail:
+        # Slow rail: a second, slower-moving EMA of the gradient (ANVIL2-style
+        # twin-rail velocity). Blended in only after the engage step.
+        if momentum_slow is None:
+            raise ValueError("twin_rail=True requires a momentum_slow buffer")
+        momentum_slow.lerp_(G, 1 - slow_beta)
+        if step < rail_engage_step:
+            blended = momentum
+        else:
+            blended = rail_fast_weight * momentum + (1 - rail_fast_weight) * momentum_slow
+        # Clone when not using Nesterov to avoid scaling the momentum buffer in-place below.
+        update = G.lerp_(blended, mu) if nesterov else blended.clone()
+    else:
+        # Clone when not using Nesterov to avoid scaling the momentum buffer in-place below.
+        update = G.lerp_(momentum, mu) if nesterov else momentum.clone()
     # Aurora's leverage-uniform polar via diagonal preconditioning.
     m, n = update.size(-2), update.size(-1)
     if m == n:
@@ -137,9 +167,14 @@ class Aurora(torch.optim.Optimizer):
         pp_iterations: leverage-uniform refinement iterations (paper default 2).
         pp_beta: row-normalization damping exponent (paper default 0.5).
         eps: numerical floor for the row-norm preconditioner.
+        rms_match: use Kimi-style RMS matching instead of aspect-ratio scaling.
         betas: AdamW-backup betas.
         adamw_eps: AdamW-backup epsilon.
         adamw_wd: AdamW-backup decoupled weight decay.
+        aurora_twin_rail: enable the E4a slow-momentum-rail extension (default off).
+        rail_slow_beta: slow-rail EMA coefficient, used only if aurora_twin_rail.
+        rail_engage_step: step at which the slow rail starts blending in.
+        rail_fast_weight: fast-rail weight in the blend after rail_engage_step.
     """
 
     def __init__(
@@ -157,6 +192,10 @@ class Aurora(torch.optim.Optimizer):
         betas=(0.9, 0.95),
         adamw_eps=1e-8,
         adamw_wd=0.0,
+        aurora_twin_rail=False,
+        rail_slow_beta=0.98,
+        rail_engage_step=514,
+        rail_fast_weight=0.4385,
         **kwargs,
     ):
         defaults = dict(
@@ -171,6 +210,10 @@ class Aurora(torch.optim.Optimizer):
             adamw_betas=betas,
             adamw_eps=adamw_eps,
             adamw_wd=adamw_wd,
+            aurora_twin_rail=aurora_twin_rail,
+            rail_slow_beta=rail_slow_beta,
+            rail_engage_step=rail_engage_step,
+            rail_fast_weight=rail_fast_weight,
         )
         aurora_params = list(aurora_params) if aurora_params is not None else []
         adamw_params = list(adamw_params) if adamw_params is not None else []
@@ -207,6 +250,10 @@ class Aurora(torch.optim.Optimizer):
                 state = self.state[p]
                 if "momentum_buffer" not in state:
                     state["momentum_buffer"] = torch.zeros_like(w2d)
+                if group["aurora_twin_rail"]:
+                    if "momentum_buffer_slow" not in state:
+                        state["momentum_buffer_slow"] = torch.zeros_like(w2d)
+                    state["step"] = state.get("step", 0) + 1
                 aurora(
                     w2d,
                     g2d,
@@ -219,6 +266,12 @@ class Aurora(torch.optim.Optimizer):
                     pp_beta=group["pp_beta"],
                     eps=group["eps"],
                     rms_match=group["rms_match"],
+                    twin_rail=group["aurora_twin_rail"],
+                    momentum_slow=state.get("momentum_buffer_slow"),
+                    slow_beta=group["rail_slow_beta"],
+                    step=state.get("step", 0),
+                    rail_engage_step=group["rail_engage_step"],
+                    rail_fast_weight=group["rail_fast_weight"],
                 )
 
             ############################
