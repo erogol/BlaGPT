@@ -37,3 +37,4 @@ F101	f1ad8ed	F99	3.1998	discard	muon_true_wd0_audit	bla_gpt/logs/ar_full_F101_0/
 E2a	142e376	F99	3.1578	keep_pending_confirmation	engram_mult20	bla_gpt/logs/ar_full_E2a_0/state_step005100.pt	Full 5100-step run; -0.0025 vs best F99=3.1603; improvement <0.003, requires one full confirmation from random init
 E1a	142e376	F99	3.2118	discard	lr_floor_0.3	bla_gpt/logs/ar_full_E1a_0/state_step005100.pt	Full 5100-step run; +0.0515 vs best F99=3.1603; no confirmation because not lower
 E1b	3a2c0f7	F99	3.1664	discard	lr_floor_0.3_ema300	bla_gpt/logs/ar_full_E1b_0/state_step005100.pt	Full 5100-step run; +0.0061 vs best F99=3.1603; no confirmation because not lower
+E1c	3a2c0f7	F99	3.1487	keep	lr_floor_0.15_ema300	bla_gpt/logs/ar_full_E1c_0/state_step005100.pt	Full 5100-step run; -0.0116 vs best F99=3.1603; clean keep, no confirmation required because improvement >=0.003
