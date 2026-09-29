@@ -101,6 +101,8 @@ GRAPE-A Query-Gated Positional Encoding (F94) - [paper](https://arxiv.org/abs/25
 
 Weight EMA + LR floor (E1c) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1487` - peak memory: `61239 MiB` - step_avg: `731.65ms` - warmdown floors at 0.15x peak lr (`final_lr_frac=0.15`) plus a trailing weight EMA over the last 300 steps used at eval (`ema_last_steps=300`); clean keep; active best config uses `final_lr_frac=0.15`, `ema_last_steps=300`.
 
+Token normalization before n-gram hash (E3) - [PR #375](https://github.com/KellerJordan/modded-nanogpt/pull/375) | [explanation](./techniques/engram.md) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1564` - peak memory: `59643 MiB` - step_avg: `719.88ms` - groups vocab tokens sharing a first-2-byte BPE prefix into one n-gram hash class (config flag `engram_normalize_tokens=true` on MinimalEngram); parallel branch off F99, not off E1c; clean keep vs F99 (`3.1603`), but E1c (`3.1487`) remains the overall best; default stays off (`engram_normalize_tokens=False`).
+
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
