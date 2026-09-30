@@ -270,6 +270,30 @@ class Attention(nn.Module):
         else:
             raise ValueError(f"Unknown positional encoding: {config.pos_encoding}")
 
+        # RoVE (rotary value embeddings, arXiv:2606.11275): rotates each
+        # value by its own source-position rotation before aggregation, and
+        # applies the inverse query-position rotation to the attention
+        # output before the output projection. Off by default; off gives the
+        # exact prior behavior. Uses its own Rotary module so it also works
+        # with pos_encoding="grape_a_qgate" (hybrid: GRAPE keeps the QK
+        # attention bias, RoVE adds a rotated OV pathway on top).
+        self.rove = bool(getattr(config, "rove", False))
+        if self.rove:
+            if config.pos_encoding == "rotary":
+                if getattr(config, "rope_variant", "standard") != "standard":
+                    raise ValueError(
+                        "rove=True requires rope_variant='standard' (RoVE needs "
+                        "an invertible 2D rotation); got "
+                        f"{getattr(config, 'rope_variant', None)!r}."
+                    )
+            elif config.pos_encoding != "grape_a_qgate":
+                raise ValueError(
+                    "rove=True is only supported with pos_encoding='rotary' "
+                    "(rope_variant='standard') or pos_encoding='grape_a_qgate'; "
+                    f"got {config.pos_encoding!r}."
+                )
+            self.rove_rotary = Rotary(self.head_dim, base=config.rope_theta)
+
         # Regularization
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
@@ -324,11 +348,21 @@ class Attention(nn.Module):
         # HybridNorm: normalize V before attention (arXiv:2503.04598 Eq.7)
         v = self._apply_v_norm(v)
 
+        # RoVE: rotate each value by its own (key/source) position before
+        # aggregation. No-op unless config.rove=True.
+        if self.rove:
+            v = self._apply_rove_value(v, T)
+
         # Compute attention
         if self.flash and self.soft_cap == 0 and not self.use_softpick:
             y = self._flash_attention(q, k, v)
         else:
             y = self._manual_attention(q, k, v, T_q, T)
+
+        # RoVE: undo the query-position rotation on the attention output,
+        # before the output projection. No-op unless config.rove=True.
+        if self.rove:
+            y = self._apply_rove_output_inverse(y, T_q)
 
         # Project output
         return self._project_output(y, B, T_q, C)
@@ -375,6 +409,29 @@ class Attention(nn.Module):
         cos, sin = self.rotary(k) if T_q != T else (cos, sin)
         k = self.apply_rope_fn(k, cos, sin)
         return q, k
+
+    def _rove_cos_sin(self, T, device):
+        # RoVE cos/sin shaped for (B, n_head, T, head_dim) layout, i.e. after
+        # _prepare_qkv has moved the head axis to dim 1 and the sequence axis
+        # to dim 2. self.rove_rotary stores plain (max_seq_len, head_dim/2)
+        # buffers; reshape here instead of calling the module's own forward
+        # (which assumes the pre-transpose (B, T, H, D) layout).
+        cos = self.rove_rotary.cos[:T].to(device)
+        sin = self.rove_rotary.sin[:T].to(device)
+        return cos[None, None, :, :], sin[None, None, :, :]
+
+    def _apply_rove_value(self, v, T):
+        # Rotate each value by its own (source/key) position, using the
+        # standard RoPE 2D-rotation convention.
+        cos, sin = self._rove_cos_sin(T, v.device)
+        return apply_rotary_emb(v, cos, sin)
+
+    def _apply_rove_output_inverse(self, y, T_q):
+        # Apply the inverse of the query-position rotation to the attention
+        # output. The RoPE rotation R(theta) is orthogonal, so
+        # R(theta)^-1 == R(theta)^T == apply_rotary_emb(..., cos, -sin).
+        cos, sin = self._rove_cos_sin(T_q, y.device)
+        return apply_rotary_emb(y, cos, -sin)
 
     def _apply_relative_pos(self, q, k, T_q, T):
         # Get relative position embeddings
