@@ -1,0 +1,6 @@
+started_utc=2026-09-30T06:34:05Z
+git_commit=04578fb97702e7462a43be6f9f29e5912dc5abc0
+run_name=ar_full_E5
+config=ar/full_runs/E5/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_E5_0
