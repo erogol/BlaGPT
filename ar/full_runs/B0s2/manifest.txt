@@ -1,0 +1,6 @@
+started_utc=2026-09-30T11:37:42Z
+git_commit=a0f9e71afa8ed9c63e23cea57ac2c22b41345805
+run_name=ar_full_B0s2
+config=ar/full_runs/B0s2/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_B0s2_0
