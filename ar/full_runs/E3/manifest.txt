@@ -1,0 +1,6 @@
+started_utc=2026-09-29T15:48:00Z
+git_commit=3a2c0f7946dc529bf5344f6f2fa95ea7bc42857a
+run_name=ar_full_E3
+config=ar/full_runs/E3/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_E3_0

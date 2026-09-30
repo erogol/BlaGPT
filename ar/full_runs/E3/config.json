@@ -15,7 +15,7 @@
   "engram_ngram": 3,
   "engram_share_embedding": true,
   "engram_variant": "minimal",
-  "engram_vocab_mult": 20,
+  "engram_vocab_mult": 5,
   "gated_norm_rank": 16,
   "hyper_dynamic": true,
   "hyper_num_streams": 4,
@@ -94,6 +94,5 @@
   "zero_init_proj_layers": true,
   "grape_omega_init": 1.0,
   "grape_v_l2_norm": true,
-  "muddformer_mix": true,
-  "muddformer_ref_layer": 0
+  "engram_normalize_tokens": true
 }
