@@ -122,6 +122,7 @@ class GPTConfig(Coqpit):
     mlp_expand: int = 4  # MLP hidden expansion factor (Primer_MLP)
     use_tapered_mlp: bool = False  # Tapered LMs (arXiv:2606.23670): cosine-taper per-layer Primer MLP width, budget-preserving
     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
+    attn_res_heads: int = 1  # Multi-Head Attention Residuals (arXiv:2607.27230): split the depth-routing query into H groups, each with its own softmax over depth. H=1 is exactly the original single-head routing.
     use_goat_sink_prior: bool = False  # GOAT key-only sink prior (arXiv:2601.15380, Litman & Guo, 2026)
     use_pre_affine_norm: bool = False  # PreAffineRMSNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.3
     use_gated_norm: bool = False  # GatedNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.4
@@ -886,6 +887,37 @@ class GPT(nn.Module):
         null_weight = torch.exp(-m)
         return weights / (null_weight + weights.sum(dim=0, keepdim=True))
 
+    def _attn_res_mix(self, _srcs, _w):
+        # Multi-Head Attention Residuals (Luo, Cai, Hu 2026; arXiv:2607.27230):
+        # split the depth-routing query into H groups of width D/H, each with
+        # its own softmax over the depth (source) axis, then concat the H
+        # routed slices back to width D. H=1 is byte-identical to the
+        # original single-head attention-residual routing (Kimi/MoonshotAI).
+        H = getattr(self.config, "attn_res_heads", 1)
+        D = _w.size(-1)
+        assert D % H == 0, (
+            f"n_embd ({D}) must be divisible by attn_res_heads ({H})"
+        )
+        if H == 1:
+            _scores = torch.stack(
+                [(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0
+            )  # (N, b, t)
+            _alpha = self._attn_res_route(_scores)
+            x = _srcs[0] * _alpha[0].unsqueeze(-1)
+            for _i in range(1, len(_srcs)):
+                x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
+            return x
+        Dh = D // H
+        _w_h = _w.view(H, Dh)  # reshape only, zero new parameters
+        _V = torch.stack(_srcs, dim=0)  # (N, b, t, D)
+        _N, _B, _T = _V.size(0), _V.size(1), _V.size(2)
+        _Vh = _V.view(_N, _B, _T, H, Dh)  # per-head source slices
+        _Vh_n = F.rms_norm(_Vh, (Dh,))  # RMSNorm within each head's slice
+        _scores = torch.einsum("he,nbthe->nbth", _w_h, _Vh_n)  # (N, b, t, H)
+        _alpha = self._attn_res_route(_scores)  # H independent softmaxes over depth
+        _mixed = torch.einsum("nbth,nbthe->bthe", _alpha, _Vh)
+        return _mixed.reshape(_B, _T, D)
+
     def _init_value_residual(self):
         # Value Residual Learning (arXiv:2410.17897), learnable-plus variant:
         # lambda1 = softmax(per-layer logits) * scale (scale init = n_layer),
@@ -952,11 +984,7 @@ class GPT(nn.Module):
             if _attn_res:
                 _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
                 _w = self.attn_res_w[layer_idx]
-                _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)  # (L, b, t)
-                _alpha = self._attn_res_route(_scores)
-                x = _srcs[0] * _alpha[0].unsqueeze(-1)
-                for _i in range(1, len(_srcs)):
-                    x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
+                x = self._attn_res_mix(_srcs, _w)
             if _unet_skips is not None and layer_idx >= _n_layers // 2:
                 x = x + self.skip_weights[layer_idx - _n_layers // 2] * _unet_skips[_n_layers - 1 - layer_idx]
             # Apply engram based on variant
@@ -995,11 +1023,7 @@ class GPT(nn.Module):
         if _attn_res:
             _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
             _w = self.attn_res_w[self.config.n_layer]
-            _scores = torch.stack([(F.rms_norm(v, (v.size(-1),)) * _w).sum(-1) for v in _srcs], dim=0)
-            _alpha = self._attn_res_route(_scores)
-            x = _srcs[0] * _alpha[0].unsqueeze(-1)
-            for _i in range(1, len(_srcs)):
-                x = x + _srcs[_i] * _alpha[_i].unsqueeze(-1)
+            x = self._attn_res_mix(_srcs, _w)
 
         if self.config.use_hyper_connections:
             x = x.sum(dim=2)
