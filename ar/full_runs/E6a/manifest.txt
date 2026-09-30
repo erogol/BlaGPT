@@ -1,0 +1,6 @@
+started_utc=2026-09-30T13:18:38Z
+git_commit=542d458b8e78417973f500cd6080cff1ae321d58
+run_name=ar_full_E6a
+config=ar/full_runs/E6a/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_E6a_0

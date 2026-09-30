@@ -46,3 +46,4 @@ E5	04578fb	F99	3.1516	discard	engram_mult20_muddformer_mix	bla_gpt/logs/ar_full_
 B0	da1363a	F99	3.1265	keep	seeded_base_engram20_seed1337	bla_gpt/logs/ar_full_B0_0/state_step005100.pt	Full 5100-step run; -0.0181 vs best E2a_confirm=3.1446; clean keep, no confirmation required because improvement >=0.003
 C1	2b8b144	B0	3.1280	discard	b0_lrfloor0.15_ema300	bla_gpt/logs/ar_full_C1_0/state_step005100.pt	Full 5100-step run; +0.0015 vs best B0=3.1265; no confirmation because not lower
 B0s2	a0f9e71	B0	3.1241	keep_pending_confirmation	b0_seed2_repeat	bla_gpt/logs/ar_full_B0s2_0/state_step005100.pt	Full 5100-step run; -0.0024 vs best B0=3.1265; improvement <0.003, requires one full confirmation from random init
+E6a	542d458	B0	3.1241	keep_pending_confirmation	mhar_heads4	bla_gpt/logs/ar_full_E6a_0/state_step005100.pt	Full 5100-step run; -0.0024 vs best B0_seed1337=3.1265; improvement <0.003, requires one full confirmation from random init
