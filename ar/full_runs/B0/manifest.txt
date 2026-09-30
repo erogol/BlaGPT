@@ -1,0 +1,6 @@
+started_utc=2026-09-30T08:18:05Z
+git_commit=da1363a79fdd5c0b86748b076e14ac00c5f93b12
+run_name=ar_full_B0
+config=ar/full_runs/B0/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_B0_0
