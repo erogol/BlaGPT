@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import random
 import sys
 
 from coqpit import Coqpit
@@ -12,6 +13,7 @@ with open(sys.argv[0]) as f:
 import glob
 import time
 from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 import torch
@@ -176,6 +178,9 @@ class WeightEMA:
 class Hyperparameters(Coqpit):
     run_name: str = "nano_gpt+rms_norm+geglu+gqa+softcap"
     compile_model: bool = True
+    seed: Optional[int] = (
+        None  # RNG seed for repeatable model init; None = unchanged behavior
+    )
     # data hyperparams
     input_bin: str = "../data/fineweb10B/fineweb_train_*.bin"  # input .bin to train on
     input_val_bin: str = (
@@ -227,6 +232,22 @@ def _apply_json_overrides(args: "Hyperparameters", config_path: str) -> None:
     for key, value in overrides.items():
         if hasattr(args, key):
             setattr(args, key, value)
+
+
+def set_seed(seed) -> None:
+    """Seed python/numpy/torch RNGs for repeatable model init.
+
+    No-op when seed is None, so default behavior is unchanged. Does not touch
+    the data loader, which is already deterministic (sequential shards, no
+    shuffle/randperm calls).
+    """
+    if seed is None:
+        return
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 # -----------------------------------------------------------------------------
@@ -297,6 +318,8 @@ if __name__ == "__main__":
     # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency. suggested to me by @Grad62304977.
     # this originates from Karpathy's experiments.
     torch.cuda.empty_cache()
+    # same seed on all ranks so model init matches before DDP broadcasts rank 0's weights
+    set_seed(args.seed)
     model = model(model_config)
     model = model.cuda()
 
@@ -374,6 +397,7 @@ if __name__ == "__main__":
         print(f"Logging run in {logdir}")
         # create the log file and set up TeeLogger
         sys.stdout = TeeLogger(logfile)
+        print(f"seed={args.seed}")
         # begin the log by printing this file (the Python code)
         print("=" * 100)
         print(code)
