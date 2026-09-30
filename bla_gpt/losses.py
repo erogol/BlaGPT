@@ -162,3 +162,118 @@ def compute_top_loss(model, x, idx, targets):
     top_loss = listnet_loss(top_logits, top_targets[:, :seq_len])
     
     return top_loss
+
+
+def construct_fsp_window_ids(targets, horizon, eot_token_id=-1):
+    """
+    Build the FSP bag-of-words target window ids and validity mask (Eq. 9
+    of arXiv:2510.14751): a(t, tau)_i = 1[i in {x_{t+2}, ..., x_{t+tau}}].
+
+    targets[:, i] == x_{i+1}, so the bag for position i is
+    targets[:, i+1 : i+tau] (token ids x_{i+2}..x_{i+tau}).
+
+    Args:
+        targets: Next-token targets, shape (B, T); targets[:, i] == x_{i+1}.
+        horizon: tau, the future window end offset (window length = tau - 1).
+        eot_token_id: token id marking a document boundary. Any window
+            containing this id is masked invalid rather than truncated, so
+            the bag never mixes tokens from two different documents.
+
+    Returns:
+        (window_ids, valid_mask, valid_count):
+            window_ids: (B, valid_count, tau - 1) target token ids per bag.
+            valid_mask: (B, valid_count) bool, False where the window
+                crosses a document boundary.
+            valid_count: T - tau + 1, number of positions with a
+                fully in-range window (0 if tau > T).
+    """
+    B, T = targets.shape
+    valid_count = T - horizon + 1
+    if valid_count <= 0:
+        return None, None, 0
+
+    device = targets.device
+    offsets = torch.arange(1, horizon, device=device)  # 1 .. tau-1
+    base = torch.arange(valid_count, device=device).unsqueeze(1)  # (valid_count, 1)
+    window_positions = base + offsets.unsqueeze(0)  # (valid_count, tau - 1)
+
+    window_ids = targets[:, window_positions]  # (B, valid_count, tau - 1)
+    crosses_boundary = (window_ids == eot_token_id).any(dim=-1)  # (B, valid_count)
+    valid_mask = ~crosses_boundary
+    return window_ids, valid_mask, valid_count
+
+
+def compute_fsp_loss(model, x, idx, targets):
+    """
+    Compute the Future Summary Prediction (FSP) auxiliary loss: a
+    memory-efficient, exact rewrite of the reweighted binary cross-entropy
+    bag-of-words loss from Mahajan et al., "Beyond Multi-Token Prediction:
+    Pretraining LLMs with Future Summaries" (arXiv:2510.14751), Eq. 9-10.
+
+    Target (Eq. 9): a(t, tau)_i = 1[i in {x_{t+2}, ..., x_{t+tau}}], a
+    multi-hot indicator over the vocabulary of tokens appearing in the
+    future window starting two steps ahead of t (skipping x_{t+1}, which
+    NTP already supervises) through tau steps ahead.
+
+    Loss (Eq. 10, uniform w(i) = 1 -- see E8_NOTE.md for why we do not use
+    the paper's optional tf-idf reweighting):
+        l_a = -sum_i [a_i * log sigmoid(z_i) + (1 - a_i) * log(1 - sigmoid(z_i))]
+    Using log(1 - sigmoid(z)) = -softplus(z) and
+    log(sigmoid(z)) - log(1 - sigmoid(z)) = z, this is algebraically exactly:
+        l_a = sum_i softplus(z_i) - sum_{i in bag} z_i
+    The first term is a plain reduction over the existing (dense) logits
+    tensor. The second term is computed by *gathering* z at the bag's
+    token ids (torch.gather) and de-duplicating repeated ids so each
+    unique vocabulary id contributes at most once, matching the multi-hot
+    semantics -- we never materialize a (batch, seq, vocab) multi-hot
+    label tensor.
+
+    Args:
+        model: The GPT model instance (must have `fsp_head` when enabled).
+        x: Hidden states from the final transformer layer, shape (B, T, n_embd).
+        idx: Input token ids, shape (B, T).
+        targets: Next-token targets, shape (B, T); targets[:, i] == x_{i+1}.
+
+    Returns:
+        Scalar FSP loss averaged over valid (non-masked) positions, or
+        None if FSP is disabled or there are no valid positions at all.
+    """
+    if not (model.config.fsp_weight > 0.0 and hasattr(model, "fsp_head")):
+        return None
+
+    tau = model.config.fsp_horizon
+    vocab_size = model.config.vocab_size
+    eot_id = getattr(model.config, "fsp_eot_token_id", -1)
+
+    window_ids, valid_mask, valid_count = construct_fsp_window_ids(targets, tau, eot_id)
+    if valid_count <= 0 or not valid_mask.any():
+        return None
+
+    # Auxiliary head logits, only for positions that could have a valid window.
+    fsp_logits = model.fsp_head(x[:, :valid_count]).float()  # (B, valid_count, V)
+    if model.soft_cap > 0.0:
+        fsp_logits = soft_cap(fsp_logits, model.soft_cap)
+
+    # Dense term: sum_i softplus(z_i), no target-dependent tensor needed.
+    softplus_sum = F.softplus(fsp_logits).sum(dim=-1)  # (B, valid_count)
+
+    # Sparse/gather term: sum over the *unique* ids in the bag of z_i.
+    # Gather logits at the bag's token ids (memory: B * valid_count * window_len,
+    # not B * valid_count * V), then de-duplicate along the window axis by
+    # sorting the ids and keeping only first occurrences.
+    z_at_ids = torch.gather(fsp_logits, dim=-1, index=window_ids)  # (B, valid_count, window_len)
+    sorted_ids, sort_idx = torch.sort(window_ids, dim=-1)
+    z_sorted = torch.gather(z_at_ids, dim=-1, index=sort_idx)
+    first_occurrence = torch.ones_like(sorted_ids, dtype=torch.bool)
+    first_occurrence[..., 1:] = sorted_ids[..., 1:] != sorted_ids[..., :-1]
+    pos_sum = (z_sorted * first_occurrence.float()).sum(dim=-1)  # (B, valid_count)
+
+    # Normalize by vocab size (mean over V, not the paper's raw sum over V)
+    # to keep the loss on a numeric scale comparable to NTP cross-entropy;
+    # see E8_NOTE.md "Normalization" section.
+    per_position_loss = (softplus_sum - pos_sum) / vocab_size
+
+    valid_mask_f = valid_mask.float()
+    denom = valid_mask_f.sum().clamp(min=1.0)
+    fsp_loss = (per_position_loss * valid_mask_f).sum() / denom
+    return fsp_loss

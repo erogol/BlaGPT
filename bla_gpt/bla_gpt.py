@@ -19,7 +19,7 @@ from attentions import (Attention, ComposableGatedAttention, DilatedAttention, E
                         MultiheadDiffAttn, MultiheadDiffAttnv2, MultiHeadLatentAttention,
                         MultiTokenAttention, PattentionSelfAttention, soft_cap)
 from coqpit import Coqpit
-from losses import compute_top_loss, compute_z_loss
+from losses import compute_fsp_loss, compute_top_loss, compute_z_loss
 from mlps import (MLP, GeGLU_MLP, Maxout_MLP, Negout_MLP, PolyNorm_MLP,
                   PolyReLU_MLP, Primer_MLP, STEM_MLP, SwiGLU_MLP, tapered_mlp_dims)
 from modules.canon_layer import CanonLayer
@@ -56,6 +56,15 @@ class GPTConfig(Coqpit):
     top_window_size: int = 1024  # Window size for TOP target construction (should be <= block_size)
     top_loss_weight: float = 1.0  # Weight for TOP loss in combined loss
     top_force_optimized: bool = True  # Force optimized Triton implementation, fail if not available
+
+    # Future Summary Prediction (FSP) parameters.
+    # Mahajan et al., "Beyond Multi-Token Prediction: Pretraining LLMs with
+    # Future Summaries" (arXiv:2510.14751). Handcrafted bag-of-words variant
+    # (paper's "FSP-BCE"), Eq. 9-10. 0.0 = disabled, exact NTP-only behavior,
+    # no extra parameters.
+    fsp_weight: float = 0.0  # Weight for the FSP auxiliary loss; 0.0 disables it entirely
+    fsp_horizon: int = 100  # tau: future window is (x_{t+2}, ..., x_{t+tau}); paper Table 3 tests tau=12 and tau=100 (long-range), we use 100
+    fsp_eot_token_id: int = 50256  # GPT-2 tiktoken <|endoftext|> id used to keep the FSP window from crossing document boundaries (see data/fineweb.py)
 
     # Transformer parameters
     norm_layer: str = "rmsnorm"  # type of normalization layer to use
@@ -296,6 +305,17 @@ class GPTConfig(Coqpit):
             raise ValueError(
                 f"TOP window size ({self.top_window_size}) cannot be larger than block size ({self.block_size})"
             )
+
+        # Validate FSP configuration
+        if self.fsp_weight > 0.0:
+            if self.fsp_horizon < 2:
+                raise ValueError(
+                    f"fsp_horizon ({self.fsp_horizon}) must be >= 2 (window is x_{{t+2}}..x_{{t+tau}})"
+                )
+            if self.fsp_horizon > self.block_size:
+                raise ValueError(
+                    f"fsp_horizon ({self.fsp_horizon}) cannot be larger than block size ({self.block_size})"
+                )
 
 
 @dataclass
@@ -769,6 +789,11 @@ class GPT(nn.Module):
         if config.use_top:
             self.top_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
+        # Future Summary Prediction (FSP) auxiliary head. Only built when
+        # fsp_weight > 0.0, so fsp_weight == 0.0 adds no parameters.
+        if config.fsp_weight > 0.0:
+            self.fsp_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
@@ -1075,6 +1100,15 @@ class GPT(nn.Module):
                 if top_loss is not None:
                     total_loss += self.config.top_loss_weight * top_loss
                     loss_dict["top_loss"] = top_loss.detach().item()
+
+                # Add FSP (Future Summary Prediction) loss if enabled.
+                # Training-only: gated on self.training so val loss (computed
+                # under model.eval()) stays plain NTP cross-entropy.
+                if self.training:
+                    fsp_loss = compute_fsp_loss(self, x, idx, targets)
+                    if fsp_loss is not None:
+                        total_loss = total_loss + self.config.fsp_weight * fsp_loss
+                        loss_dict["fsp_loss"] = fsp_loss.detach().item()
 
                 if self.config.z_loss_weight > 0.0:
                     z_loss = compute_z_loss(logits)
