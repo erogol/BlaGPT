@@ -73,6 +73,13 @@ class GPTConfig(Coqpit):
     use_pre_post_norm: bool = False  # from Qwen, for better training stability
     rope_theta: float = 10000  # 1000000.0 in llama3 models
     rope_variant: str = "standard"  # Options: "standard" (2D rotations) or "simplified" (concatenation)
+    # RoVE: rotary value embeddings (arXiv:2606.11275). Rotates each value by
+    # its own position before aggregation, and inverts the rotation on the
+    # attention output before the output projection. Off by default; when
+    # off, behavior is exactly unchanged. Supported with pos_encoding=="rotary"
+    # (rope_variant=="standard" only) and, as a hybrid, with
+    # pos_encoding=="grape_a_qgate".
+    rove: bool = False
     # GRAPE-A query-gated additive position bias (arXiv:2512.07805),
     # active only when pos_encoding == "grape_a_qgate" (replaces RoPE)
     grape_omega_init: float = 1.0  # initial per-head decay rate (softplus-parameterized)
@@ -268,6 +275,21 @@ class GPTConfig(Coqpit):
         if self.pos_encoding == "rotary":
             if self.rope_variant not in ['standard', 'simplified']:
                 raise ValueError(f"rope_variant must be 'standard' or 'simplified', got {self.rope_variant}")
+
+        # Validate rove (RoVE, rotary value embeddings)
+        if self.rove:
+            if self.pos_encoding == "rotary":
+                if self.rope_variant != "standard":
+                    raise ValueError(
+                        "rove=True requires rope_variant='standard' "
+                        f"(RoVE needs an invertible 2D rotation); got {self.rope_variant!r}."
+                    )
+            elif self.pos_encoding != "grape_a_qgate":
+                raise ValueError(
+                    "rove=True is only supported with pos_encoding='rotary' "
+                    "(rope_variant='standard') or pos_encoding='grape_a_qgate' "
+                    f"(RoVE hybrid); got {self.pos_encoding!r}."
+                )
 
         # Validate TOP configuration
         if self.use_top and self.top_window_size > self.block_size:
