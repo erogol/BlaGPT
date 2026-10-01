@@ -53,3 +53,4 @@ E7b	7f91222	E7a	3.1106	keep_pending_confirmation	RoVE_on_rotary	bla_gpt/logs/ar_
 E7c	b17f3cc	B0	3.1262	keep_pending_confirmation	GRAPE_RoVE	bla_gpt/logs/ar_full_E7c_0/state_step005100.pt	Full 5100-step run; -0.0003 vs best B0_seed1337=3.1265; improvement <0.003, requires one full confirmation from random init
 E6b_s2	7a22d3d	B0s2	3.1203	keep	mhar_heads8_seed2	bla_gpt/logs/ar_full_E6b_s2_0/state_step005100.pt	Full 5100-step run; -0.0038 vs best B0_seed2=3.1241; clean keep, no confirmation required because improvement >=0.003
 E7a_s2	74b8290	B0s2	3.1250	discard	rotary_without_RoVE_seed2	bla_gpt/logs/ar_full_E7a_s2_0/state_step005100.pt	Full 5100-step run; +0.0009 vs best B0_seed2=3.1241; no confirmation because not lower
+E7b_s2	7949e52	E7a_s2	3.1240	keep_pending_confirmation	rotary_rove_seed2	bla_gpt/logs/ar_full_E7b_s2_0/state_step005100.pt	Full 5100-step run; -0.0010 vs best E7a_s2=3.125; improvement <0.003, requires one full confirmation from random init
