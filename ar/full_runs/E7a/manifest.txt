@@ -1,0 +1,6 @@
+started_utc=2026-10-01T02:17:57Z
+git_commit=7e505a9be72ec49ce853695548a29f97a9172737
+run_name=ar_full_E7a
+config=ar/full_runs/E7a/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_E7a_0
