@@ -6,6 +6,7 @@ This directory tries to explain various techniques implemented in this repositor
 - [**ResFormer**](./resformer.md) - Value residual learning from first layer to all subsequent layers
 - [**Composable Value Residual**](./value_residual.md) - ResFormer-style value residuals inside the normal BlaGPT attention path
 - [**U-net Long Skips**](./unet_skips.md) - Mirrored early-to-late layer skip connections with learned scalar weights
+- [**Multi-Head Attention Residuals**](./mhar.md) - Per-subspace depth routing for Attention Residuals (H heads, zero new parameters)
 
 ## Attention Mechanisms
 - [**Differential Attention v2**](./diff_attn_v2.md) - Subtracts two attention patterns to cancel noise and amplify relevant signals
@@ -14,6 +15,7 @@ This directory tries to explain various techniques implemented in this repositor
 - [**Exclusive Self Attention**](./exclusive_self_attention.md) - Removes the value-direction component from attention outputs
 - [**GOAT Sink Prior**](./goat_sink_prior.md) - Per-head key-0 attention log-prior for learned sink control
 - [**GRAPE-A Query-Gated**](./grape_a_qgate.md) - Query-gated additive position bias replacing RoPE with learned content-dependent decay
+- [**RoVE**](./rove.md) - Rotary value embeddings: rotates values with RoPE so the value pathway is position-relative; current best (E7b)
 - [**Key-Dimension Attention (KDA)**](./kda.md) - Linear-complexity attention with fine-grained gating and delta rule
 
 ## Normalization
@@ -30,5 +32,5 @@ This directory tries to explain various techniques implemented in this repositor
 ## Optimizers
 - [**AdaMuon**](./adamuon.md) - Adaptive Muon optimizer with second-moment estimation
 - [**NorMuon**](./normuon.md) - Normalized Muon optimizer with norm-preserving adaptive scaling
-- [**Aurora**](./aurora.md) - Leverage-aware spectral optimizer (Muon-family); current best optimizer (F99)
+- [**Aurora**](./aurora.md) - Leverage-aware spectral optimizer (Muon-family); current best optimizer
 - [**Cautious Weight Decay**](./cautious_weight_decay.md) - Selective weight decay based on momentum-parameter sign alignment

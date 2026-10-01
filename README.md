@@ -95,13 +95,23 @@ Learning-rate ×1.4 sweep (F90) - [Muon source](https://kellerjordan.github.io/p
 
 Learning-rate ×1.4 validated and confirmed (F90r/F90r2) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1965` - first run: `3.1972`; independent confirmation: `3.1965` - peak memory: `58632 MiB` - step_avg: `491.00ms` - confirmed keep; active best config uses `learning_rate=0.0014`.
 
-GRAPE-A Query-Gated Positional Encoding (F94) - [paper](https://arxiv.org/abs/2512.07805) | [explanation](./techniques/grape_a_qgate.md) - best_model_loss: `3.1965` -> new_best_model_loss: `3.1897` - peak memory: `59643 MiB` - step_avg: `580.32ms` - replaces RoPE with query-gated additive position bias; confirmed keep; active best config uses `pos_encoding="grape_a_qgate"`.
+GRAPE-A Query-Gated Positional Encoding (F94) - [paper](https://arxiv.org/abs/2512.07805) | [explanation](./techniques/grape_a_qgate.md) - best_model_loss: `3.1965` -> new_best_model_loss: `3.1897` - peak memory: `59643 MiB` - step_avg: `580.32ms` - replaces RoPE with query-gated additive position bias; confirmed keep; later replaced by rotary + RoVE (E7a/E7b).
 
-👑 Aurora Optimizer (F99) - [paper](https://arxiv.org/abs/2606.27715) | [explanation](./techniques/aurora.md) - best_model_loss: `3.1897` -> new_best_model_loss: `3.1603` - peak memory: `59643 MiB` - step_avg: `721.25ms` - replaces Muon with leverage-aware spectral updates at `learning_rate=0.03`; clean keep; active best config uses `optimizer_name="Aurora"`.
+Aurora Optimizer (F99) - [paper](https://arxiv.org/abs/2606.27715) | [explanation](./techniques/aurora.md) - best_model_loss: `3.1897` -> new_best_model_loss: `3.1603` - peak memory: `59643 MiB` - step_avg: `721.25ms` - replaces Muon with leverage-aware spectral updates at `learning_rate=0.03`; clean keep; active best config uses `optimizer_name="Aurora"`.
 
-Weight EMA + LR floor (E1c) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1487` - peak memory: `61239 MiB` - step_avg: `731.65ms` - warmdown floors at 0.15x peak lr (`final_lr_frac=0.15`) plus a trailing weight EMA over the last 300 steps used at eval (`ema_last_steps=300`); clean keep; active best config uses `final_lr_frac=0.15`, `ema_last_steps=300`.
+Weight EMA + LR floor (E1c) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1487` - peak memory: `61239 MiB` - step_avg: `731.65ms` - warmdown floors at 0.15x peak lr (`final_lr_frac=0.15`) plus a trailing weight EMA over the last 300 steps used at eval (`ema_last_steps=300`); clean keep; later dropped from the best config (no gain on the B0 stack, see C1 below).
 
 Token normalization before n-gram hash (E3) - [PR #375](https://github.com/KellerJordan/modded-nanogpt/pull/375) | [explanation](./techniques/engram.md) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1564` - peak memory: `59643 MiB` - step_avg: `719.88ms` - groups vocab tokens sharing a first-2-byte BPE prefix into one n-gram hash class (config flag `engram_normalize_tokens=true` on MinimalEngram); parallel branch off F99, not off E1c; clean keep vs F99 (`3.1603`), but E1c (`3.1487`) remains the overall best; default stays off (`engram_normalize_tokens=False`).
+
+Engram vocab ×20 (E2a/E2a_confirm) - [paper](https://github.com/deepseek-ai/Engram/blob/main/Engram_paper.pdf) | [explanation](./techniques/engram.md) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1446` - step_avg: `1077.31ms` - raises `engram_vocab_mult` from 5 to 20; first run `3.1578`, rerun `3.1446`; parallel branch off F99 without the E1c LR floor/EMA; beats E1c (`3.1487`); about 49% slower per step than F99 (`721ms`).
+
+Seeded re-baseline (B0) - best_model_loss: `3.1446` -> new_best_model_loss: `3.1265` - peak memory: `85625 MiB` - step_avg: `1065.74ms` - same config as E2a_confirm plus `seed=1337` and the merged E6-E8 code (all off by default); cause of the gain not isolated (seed vs code change); seed 2 repeat: `3.1241`. Adding the E1c LR floor + EMA on top (C1) gave `3.1280`, so the best config drops `final_lr_frac` and `ema_last_steps`.
+
+Multi-Head Attention Residuals, H=8 (E6b) - [paper](https://arxiv.org/abs/2607.27230) | [explanation](./techniques/mhar.md) - best_model_loss: `3.1265` -> loss: `3.1238` - peak memory: `93225 MiB` (seed-2 run) - step_avg: `1149.40ms` - splits the depth-routing query of Attention Residuals into 8 heads; seed 2: `3.1241` -> `3.1203`; about 8% slower; on top of rotary + RoVE (Combined): `3.1106` -> `3.1113` - did not beat the new best; not in the best config.
+
+Rotary (RoPE) replaces GRAPE-A (E7a) - [paper](https://arxiv.org/abs/2104.09864) - best_model_loss: `3.1265` -> new_best_model_loss: `3.1134` - peak memory: `85160 MiB` (seed-2 run) - step_avg: `993.42ms` - standard RoPE (`rope_theta=1e6`) instead of the GRAPE-A additive bias; about 7% faster than B0; seed 2: `3.1250` vs B0 seed 2 `3.1241` (no loss gain), so the speed gain holds but the loss gain is not confirmed.
+
+👑 RoVE on rotary (E7b) - [paper](https://arxiv.org/abs/2606.11275) | [explanation](./techniques/rove.md) - best_model_loss: `3.1134` -> new_best_model_loss: `3.1106` - peak memory: `85258 MiB` (seed-2 run) - step_avg: `1018.28ms` - rotates each value by its own position and un-rotates the attention output by the query position; zero new parameters; seed 2: `3.1250` -> `3.1240`; small gain on both seeds; active best config uses `pos_encoding="rotary"`, `rove=true`.
 
 
 ## Other Models
@@ -303,7 +313,7 @@ Latest archived architecture-best checkpoint:
 - **Size:** `3,039,250,572` bytes
 - **Uploaded:** `2026-07-14 08:12:27 UTC`
 
-The current autoresearch ledger is `ar/results.tsv`; the active best config is `ar/best_config.json`. The confirmed best result is F99 with the Aurora optimizer (`3.1603`), superseding F94 GRAPE-A (`3.1897`).
+The current autoresearch ledger is `ar/results.tsv`; the active best config is `ar/best_config.json`. The full-run ledger is `ar/full_results.tsv`. The current best result is E7b, rotary + RoVE on the Aurora + Engram ×20 stack (`3.1106`), superseding F99 Aurora (`3.1603`) and F94 GRAPE-A (`3.1897`).
 
 ## Best Model So Far
 

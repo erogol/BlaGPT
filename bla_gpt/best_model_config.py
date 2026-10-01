@@ -34,7 +34,8 @@ class BestConfig(GPTConfig):
     tie_embed_weights: bool = True
     zero_init_proj_layers: bool = True
     rmsnorm_before_qk: bool = True
-    pos_encoding: str = "grape_a_qgate"
+    pos_encoding: str = "rotary"
+    rove: bool = True  # RoVE: rotary value embeddings (E7b)
     use_res_weights: bool = False
     use_qkv_bias: bool = False  # from Qwen, for better length generalization. Not an issue with block_size=1024
     use_pre_post_norm: bool = False  # from Qwen, for better training stability
@@ -75,7 +76,7 @@ class BestConfig(GPTConfig):
     use_engram: bool = True
     engram_layers=[1,2,3,4,5,6]
     engram_ngram=3
-    engram_vocab_mult: int = 5
+    engram_vocab_mult: int = 20
     engram_share_embedding: bool = True
     engram_variant: str = "minimal"
 

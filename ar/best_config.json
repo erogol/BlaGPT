@@ -15,7 +15,7 @@
   "engram_ngram": 3,
   "engram_share_embedding": true,
   "engram_variant": "minimal",
-  "engram_vocab_mult": 5,
+  "engram_vocab_mult": 20,
   "gated_norm_rank": 16,
   "hyper_dynamic": true,
   "hyper_num_streams": 4,
@@ -92,7 +92,8 @@
   "weight_sharing_pattern": [],
   "z_loss_weight": 0.0,
   "zero_init_proj_layers": true,
-  "final_lr_frac": 0.15,
-  "ema_last_steps": 300,
+  "grape_omega_init": 1.0,
+  "grape_v_l2_norm": true,
+  "seed": 1337,
   "rove": true
 }
