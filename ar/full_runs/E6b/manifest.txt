@@ -1,0 +1,6 @@
+started_utc=2026-09-30T15:06:01Z
+git_commit=b88289bf3d39195b16ad725a97c5100d03c90f34
+run_name=ar_full_E6b
+config=ar/full_runs/E6b/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_E6b_0
