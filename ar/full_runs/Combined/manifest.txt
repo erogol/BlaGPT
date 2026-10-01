@@ -1,0 +1,6 @@
+started_utc=2026-10-01T14:26:32Z
+git_commit=75edd62cfee8e105eba85f1c45683063128b2afa
+run_name=ar_full_Combined
+config=ar/full_runs/Combined/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_Combined_0
