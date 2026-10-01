@@ -99,7 +99,7 @@
   "num_iterations": 20,
   "warmdown_iters": 10,
   "val_loss_every": 10,
-  "val_tokens": 65536,
+  "val_tokens": 262144,
   "save_every": 0,
   "save_best_model": false
 }
