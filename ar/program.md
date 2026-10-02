@@ -1,26 +1,5 @@
 # BlaGPT autoresearch — program.md (v3 — FULL-TRAINING RESEARCH)
 
-## Coordination note (2026-07-12)
-
-Two parallel experiment tracks were briefly active. The second track has STOOD
-DOWN after: recording F78 (PoPE, discard 3.2299, commit 1046299) and F79 (GOAT
-relative spectral prior, discard 3.2257, commits ff3e595/04feba1). Best remains
-F77 = 3.2230. Handoff notes for the active agent:
-- ar/record_run.py (committed) appends the ledger row + commits from a run.log;
-  it is dedup-guarded. CHAIN IT after run_full_experiment.sh in every launch
-  so no completed run is left unrecorded. An insurance recorder for F80 is already
-  running for F80 (harmless if you record first).
-- F80 NAG readout pitfall: exp(s_L) must actually reach the logits -- RMSNorm-family
-  ln_f erases scale. Verify the implementation. NAG also attenuates attention sinks,
-  possibly redundant with the kept GOAT sink prior (F74).
-- Lipschitz training (2507.13338): deprioritize -- the paper itself matches baseline
-  accuracy only at a vacuous 1e264 Lipschitz bound; it is a robustness method, not a
-  val-loss improver.
-- Branch pushed to GitHub through cf64a6a. Push after every keep and
-  
-  periodically regardless -- machine time limit ends ~Jul 13-15.
-- Protocol: never two GPU experiments concurrently.
-
 ## v3 protocol — FULL TRAINING ONLY (2026-07-12)
 
 This section overrides every conflicting 600-second/time-budget rule below.
@@ -31,7 +10,7 @@ This section overrides every conflicting 600-second/time-budget rule below.
 - Baseline/crowned parent: combined-keeps full run, final val_loss **3.2354**,
   checkpoint `bla_gpt/logs/combined_keeps_full_5100_0/state_step005100.pt`.
   Experiments still start from RANDOM INIT; this checkpoint is comparison only.
-- Launch: `ar/run_full_experiment.sh <id> <config.json>` inside a
+- Launch: `ar/run_full_experiment.sh <id> <config.json>` in a
   persistent shell session. Artifacts live in `ar/full_runs/<id>/`.
 - Keep iff final step-5100 validation loss is lower than the current full-run
   best. Improvements below 0.003 require one full confirmation rerun. There is
@@ -50,8 +29,7 @@ This section overrides every conflicting 600-second/time-budget rule below.
 
 ## Harness location (moved into repo 2026-07-10)
 
-The harness lives IN-REPO at `ar/` (`ar` is a symlink to
-it, all old paths still work). Every experiment commit MUST include the
+The harness lives IN-REPO at `ar/`. Every experiment commit MUST include the
 updated `ar/results.tsv`, `ar/ideas.md`, and `ar/runs/<n>/` so the full
 tried-ideas history is durable in git and survives machine loss. Never commit
 `*.bundle` files (gitignored).
@@ -67,7 +45,6 @@ original ideas. Implementing something that might not work is the job, not
 a risk.
 
 Run tag: `jul8` · branch `autoresearch/jul8` · an 8× H100 node
-Spec: v0.2
 Metric: `final_val_loss` from `ar/runs/<n>/run.log` (lower is better).
 Budget: AR_TIME_BUDGET=600 s pure training time (compile + val excluded).
 Current best: 3.4047 (exp 35, warmup100 + curriculum 1200@384 + 11 layers + no PLTE + rope_theta 1e6 + MHA, commit 52df558). EPSILON = 0.0064.

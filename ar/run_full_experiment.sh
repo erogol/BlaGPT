@@ -3,7 +3,7 @@
 set -euo pipefail
 ID=$1
 CONFIG=$2
-ROOT=.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RUN_DIR="$ROOT/ar/full_runs/$ID"
 RUN_NAME="ar_full_${ID}"
 mkdir -p "$RUN_DIR"

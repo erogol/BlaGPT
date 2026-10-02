@@ -2,7 +2,8 @@
 # frozen_check.sh — verifies the FROZEN harness invariants after an experiment.
 # Exit 0 = OK, 1 = VIOLATION (run is void regardless of val_loss).
 set -u
-R=bla_gpt
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+R=$ROOT/bla_gpt
 fail=0
 chk() { grep -qF "$1" "$2" || { echo "FROZEN VIOLATION: missing '$1' in $2"; fail=1; }; }
 
@@ -34,20 +35,20 @@ fi
 # 2d. no pretrained weights / external artifacts in experiment diffs
 # (scan lines ADDED since base commit for banned loading patterns)
 BANNED='torch\.load|from_pretrained|hf_hub|safetensors|urlretrieve|urlopen|requests\.get'
-if (cd . && git diff 9740ded -- bla_gpt/ | grep '^+' | grep -Ev '^\+\+\+' | grep -Eq "$BANNED"); then
+if (cd "$ROOT" && git diff 9740ded -- bla_gpt/ | grep '^+' | grep -Ev '^\+\+\+' | grep -Eq "$BANNED"); then
     echo "FROZEN VIOLATION: banned weight-loading/download pattern added since base commit"
-    (cd . && git diff 9740ded -- bla_gpt/ | grep '^+' | grep -E "$BANNED" | head -5)
+    (cd "$ROOT" && git diff 9740ded -- bla_gpt/ | grep '^+' | grep -E "$BANNED" | head -5)
     fail=1
 fi
 
 # 2e. clock-integrity tripwire (non-fatal): flag diffs touching time accounting
-if (cd . && git diff f32b8a3 -- bla_gpt/train_ar.py | grep '^+' | grep -Ev '^\+\+\+' | grep -Eq 'training_time_ms|t0 = time'); then
+if (cd "$ROOT" && git diff f32b8a3 -- bla_gpt/train_ar.py | grep '^+' | grep -Ev '^\+\+\+' | grep -Eq 'training_time_ms|t0 = time'); then
     echo "WARNING: diff touches clock accounting (training_time_ms/t0) — driver must review for free-compute windows"
 fi
 
 # 3. runner untouched
-if [ -f ar/run_experiment.sh.sha256 ]; then
-    (cd ar && sha256sum -c --quiet run_experiment.sh.sha256) \
+if [ -f "$ROOT/ar/run_experiment.sh.sha256" ]; then
+    (cd "$ROOT/ar" && sha256sum -c --quiet run_experiment.sh.sha256) \
         || { echo "FROZEN VIOLATION: run_experiment.sh modified"; fail=1; }
 fi
 

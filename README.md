@@ -302,16 +302,7 @@ Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
 ```
 
 
-## Autoresearch checkpoint archive
-
-Latest archived architecture-best checkpoint:
-
-- **Run:** F87c aggregate confirmation (unconfirmed seed-low; F87 architecture result remains `3.1979`)
-- **Validation loss:** `3.1961` at step `5100` (F87c2 confirmation: `3.1987`)
-- **Local checkpoint:** `bla_gpt/logs/ar_full_F87c_0/state_step005100.pt`
-- **Checkpoint:** archived externally (`F87c/state_step005100.pt`)
-- **Size:** `3,039,250,572` bytes
-- **Uploaded:** `2026-07-14 08:12:27 UTC`
+## Autoresearch results
 
 The current autoresearch ledger is `ar/results.tsv`; the active best config is `ar/best_config.json`. The full-run ledger is `ar/full_results.tsv`. The current best result is E7b, rotary + RoVE on the Aurora + Engram ×20 stack (`3.1106`), superseding F99 Aurora (`3.1603`) and F94 GRAPE-A (`3.1897`).
 

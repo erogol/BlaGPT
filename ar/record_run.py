@@ -5,10 +5,10 @@ Appends a row to ar/full_results.tsv from ar/full_runs/<id>/run.log and commits,
 so a completed run is never left unrecorded even if the supervisor dies.
 Dedup-guarded: exits if the id already has a ledger row.
 """
-import re, subprocess, sys
+import os, re, subprocess, sys
 
 ID, PARENT, NAME, BEST, BEST_LABEL = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4]), sys.argv[5]
-ROOT = "."
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 tsv = f"{ROOT}/ar/full_results.tsv"
 if any(l.startswith(ID + "\t") for l in open(tsv)):
     sys.exit(f"{ID} already recorded")

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Sequential experiment queue: F100a/b/c (Aurora rms_match LR sweep) + F101 (Muon true wd=0)
 set -u
-ROOT=.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 for SPEC in \
   "F100a:ar/full_train/configs/F100a_aurora_rms_lr0.003.json" \

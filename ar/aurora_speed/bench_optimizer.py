@@ -18,7 +18,7 @@ from pathlib import Path
 
 import torch
 
-ROOT = Path(".")
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "bla_gpt"))
 
 def build(optimizer_name: str):
