@@ -29,9 +29,16 @@ def describe_update_paths(
             path = "adamw"
         else:
             path = "none"
+        group = next(
+            (g for g in optimizer.param_groups if any(q is p for q in g["params"])),
+            None,
+        )
+        lr_now = None if group is None else group["lr"]
+        peak_lr = None if group is None else group.get("initial_lr")
         lines.append(
             f"[update_path_probe step=1] param={name} shape={tuple(p.shape)} "
-            f"tied_lm_head={p is head} path={path} state_keys={sorted(state.keys())}"
+            f"tied_lm_head={p is head} path={path} state_keys={sorted(state.keys())} "
+            f"group_peak_lr={peak_lr} group_lr_now={lr_now}"
         )
     return lines
 

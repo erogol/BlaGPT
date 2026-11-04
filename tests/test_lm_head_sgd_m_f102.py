@@ -230,6 +230,60 @@ def test_update_path_probe_flag_on_reports_sgd_m():
     assert "path=sgd_m" in lines[0]
 
 # ---------------------------------------------------------------------------
+# 5c. Untied head (tie_embed_weights=False): only lm_head.weight moves.
+# ---------------------------------------------------------------------------
+class UntiedTinyModel(nn.Module):
+    """Same as TiedTinyModel, but lm_head.weight is its own tensor."""
+
+    def __init__(self, vocab=16, dim=12):
+        super().__init__()
+        self.transformer = nn.ModuleDict(dict(wte=nn.Embedding(vocab, dim)))
+        self.fc = nn.Linear(dim, dim, bias=True)
+        self.lm_head = nn.Linear(dim, vocab, bias=False)
+
+    def forward(self, idx):
+        return self.lm_head(self.fc(self.transformer["wte"](idx)))
+
+
+def _untied_probe_lines(args):
+    from optimizers import describe_update_paths
+
+    torch.manual_seed(11)
+    model = UntiedTinyModel()
+    opt = get_optimizer("Aurora", args, lr=0.05, model=model)
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda it: 1.0)
+    idx = torch.randint(0, 16, (2, 6))
+    target = torch.randint(0, 16, (2, 6))
+    loss = nn.functional.cross_entropy(model(idx).reshape(-1, 16), target.reshape(-1))
+    loss.backward()
+    opt.step()
+    sched.step()
+    lines = describe_update_paths(model, opt)
+    return {line.split("param=")[1].split()[0]: line for line in lines}
+
+
+def test_untied_flag_off_head_on_adamw_wte_on_aurora():
+    lines = _untied_probe_lines(dict(AURORA_ARGS))
+    assert set(lines) == {"transformer.wte.weight", "lm_head.weight"}
+    assert "path=adamw" in lines["lm_head.weight"]
+    assert "tied_lm_head=True" in lines["lm_head.weight"]
+    assert "group_peak_lr=0.05" in lines["lm_head.weight"]
+    assert "path=aurora" in lines["transformer.wte.weight"]
+    assert "tied_lm_head=False" in lines["transformer.wte.weight"]
+
+
+def test_untied_flag_on_head_on_sgd_m_wte_on_aurora():
+    args = dict(AURORA_ARGS)
+    args["lm_head_sgd_m"] = True
+    args["lm_head_sgd_lr"] = 0.1
+    lines = _untied_probe_lines(args)
+    assert "path=sgd_m" in lines["lm_head.weight"]
+    assert "group_peak_lr=0.1" in lines["lm_head.weight"]
+    assert "path=aurora" in lines["transformer.wte.weight"]
+    assert "group_peak_lr=0.05" in lines["transformer.wte.weight"]
+
+
+# ---------------------------------------------------------------------------
 # 6. Flag on without an lm_head must fail loudly, not silently.
 # ---------------------------------------------------------------------------
 def test_flag_on_without_lm_head_raises():
