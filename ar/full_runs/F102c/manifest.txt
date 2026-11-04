@@ -1,0 +1,6 @@
+started_utc=2026-11-04T16:03:46Z
+git_commit=32ce4be49f9d5ea7f3ea31a558f8731e12f52fd2
+run_name=ar_full_F102c
+config=ar/full_runs/F102c/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_F102c_0
