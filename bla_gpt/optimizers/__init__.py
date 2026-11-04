@@ -173,6 +173,9 @@ def get_optimizer(
         optimizer = getattr(module, "Aurora")
         # F102 (arXiv 2610.38277): optional SGD-M routing for the tied
         # embedding / LM head tensor. Default off = bit-identical Aurora.
+        # Copy first: the pops below must not strip the flags from the
+        # caller's args.optimizer_args (checkpoints store that dict).
+        optimizer_params = dict(optimizer_params)
         lm_head_sgd_m = optimizer_params.pop("lm_head_sgd_m", False)
         lm_head_sgd_lr = optimizer_params.pop("lm_head_sgd_lr", 0.01)
         aurora_params = [
