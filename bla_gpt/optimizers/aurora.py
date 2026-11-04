@@ -161,6 +161,9 @@ class Aurora(torch.optim.Optimizer):
         lr: learning rate (Aurora ``eta`` and the AdamW backup lr).
         aurora_params: >= 2D matrix params optimized by Aurora.
         adamw_params: params optimized by the AdamW backup.
+        sgd_m_params: params optimized by plain SGD with momentum (F102, arXiv 2610.38277).
+        sgd_m_lr: base lr for the SGD-M group (scaled by the train scheduler).
+        sgd_m_momentum: momentum coefficient for the SGD-M group (paper Figure 4: 0.99).
         weight_decay: decoupled weight decay for the Aurora path (paper default 0.025).
         mu: SGD-momentum coefficient (paper default 0.95).
         nesterov: use Nesterov momentum (paper default True).
@@ -182,6 +185,9 @@ class Aurora(torch.optim.Optimizer):
         lr=0.05,
         aurora_params=None,
         adamw_params=None,
+        sgd_m_params=None,
+        sgd_m_lr=0.01,
+        sgd_m_momentum=0.99,
         weight_decay=0.025,
         mu=0.95,
         nesterov=True,
@@ -217,7 +223,20 @@ class Aurora(torch.optim.Optimizer):
         )
         aurora_params = list(aurora_params) if aurora_params is not None else []
         adamw_params = list(adamw_params) if adamw_params is not None else []
-        super().__init__(aurora_params + adamw_params, defaults)
+        sgd_m_params = list(sgd_m_params) if sgd_m_params is not None else []
+        if sgd_m_params:
+            param_groups = [
+                dict(params=aurora_params + adamw_params, **defaults),
+                dict(
+                    params=sgd_m_params,
+                    lr=sgd_m_lr,
+                    momentum=sgd_m_momentum,
+                    use_sgd_m=True,
+                ),
+            ]
+            super().__init__(param_groups, defaults)
+        else:
+            super().__init__(aurora_params + adamw_params, defaults)
         for p in aurora_params:
             assert p.ndim >= 2, p.ndim
             self.state[p]["use_aurora"] = True
@@ -233,6 +252,23 @@ class Aurora(torch.optim.Optimizer):
 
         for group in self.param_groups:
             lr = group["lr"]
+
+            ############################
+            #   SGD-M group (F102)    #
+            ############################
+            if group.get("use_sgd_m", False):
+                momentum = group["momentum"]
+                for p in group["params"]:
+                    g = p.grad
+                    if g is None:
+                        continue
+                    state = self.state[p]
+                    if "sgd_momentum_buffer" not in state:
+                        state["sgd_momentum_buffer"] = torch.zeros_like(g)
+                    buf = state["sgd_momentum_buffer"]
+                    buf.mul_(momentum).add_(g)
+                    p.data.add_(buf, alpha=-lr)
+                continue
 
             ############################
             #          Aurora          #

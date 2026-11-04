@@ -139,6 +139,10 @@ def get_optimizer(
     elif optimizer_name.lower() == "aurora":
         module = importlib.import_module("optimizers.aurora")
         optimizer = getattr(module, "Aurora")
+        # F102 (arXiv 2610.38277): optional SGD-M routing for the tied
+        # embedding / LM head tensor. Default off = bit-identical Aurora.
+        lm_head_sgd_m = optimizer_params.pop("lm_head_sgd_m", False)
+        lm_head_sgd_lr = optimizer_params.pop("lm_head_sgd_lr", 0.01)
         aurora_params = [
             p
             for name, p in model.named_parameters()
@@ -149,10 +153,42 @@ def get_optimizer(
             for name, p in model.named_parameters()
             if p.ndim < 2 or "embed_tokens" in name or "lm_head" in name
         ]
+        sgd_m_params = []
+        # The tied tensor is the lm_head weight object. With weight tying the
+        # input embedding (e.g. transformer.wte.weight) shares this object, so
+        # named_parameters() yields it once under the embedding's name.
+        head_tensor = getattr(getattr(model, "lm_head", None), "weight", None)
+        if lm_head_sgd_m:
+            if head_tensor is None:
+                raise ValueError(
+                    "lm_head_sgd_m=True requires model.lm_head.weight (the tied head tensor)"
+                )
+            sgd_m_params = [head_tensor]
+            aurora_params = [p for p in aurora_params if p is not head_tensor]
+            adamw_params = [p for p in adamw_params if p is not head_tensor]
+        # Routing probe (always on, before step 1): report which update rule
+        # holds the tied embedding / LM head tensor. Lands in run.log.
+        if head_tensor is not None:
+            for name, p in model.named_parameters():
+                if p is not head_tensor:
+                    continue
+                if any(p is q for q in sgd_m_params):
+                    rule = f"sgd_m(lr={lm_head_sgd_lr}, momentum=0.99)"
+                elif any(p is q for q in aurora_params):
+                    rule = "aurora"
+                else:
+                    rule = "adamw"
+                print(
+                    f"[lm_head_probe] tied lm_head/embedding tensor param_name={name} "
+                    f"shape={tuple(head_tensor.shape)} update_rule={rule}"
+                )
+                break
         return optimizer(
             lr=lr,
             aurora_params=aurora_params,
             adamw_params=adamw_params,
+            sgd_m_params=sgd_m_params,
+            sgd_m_lr=lm_head_sgd_lr,
             **optimizer_params
         )
     elif optimizer_name.lower() == "biclip":
