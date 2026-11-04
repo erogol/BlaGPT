@@ -452,9 +452,7 @@ if __name__ == "__main__":
                 for _ in range(val_steps):
                     x_val, y_val = val_loader.next_batch()
                     with ctx:  # of course, we'd like to use no_grad() here too, but that creates a torch.compile error for some reason
-                        # same name as the train forward: keeps the old `_`
-                        # tensor lifetime, so peak memory is unchanged
-                        step_logits, loss = model(x_val, y_val)
+                        _, loss = model(x_val, y_val)
                         metrics = None
                         if type(loss) is dict:
                             metrics = {k: v for k, v in loss.items() if k != "total"}
@@ -546,16 +544,35 @@ if __name__ == "__main__":
         curriculum_steps = getattr(model_config, "seq_curriculum_steps", 0)
         curriculum_len = getattr(model_config, "seq_curriculum_len", T)
         use_short_sequence = curriculum_steps > 0 and step < curriculum_steps
+        logit_norm_val = None
         for i in range(1, train_accumulation_steps + 1):
             # forward pass
             with ctx:
                 if use_short_sequence:
-                    step_logits, loss = model(
+                    _, loss = model(
                         x[:, :curriculum_len].contiguous(),
                         y[:, :curriculum_len].contiguous(),
                     )
                 else:
-                    step_logits, loss = model(x, y)
+                    _, loss = model(x, y)
+                # Logit-norm probe (arXiv 2610.38277): mean output logit L2
+                # norm, last micro-batch, every 100 steps, always on. Early
+                # warning for LM-head mean drift. Reads `_` in place, so the
+                # logits tensor lifetime (and peak memory) is unchanged.
+                if (
+                    master_process
+                    and step % 100 == 0
+                    and i == train_accumulation_steps
+                    and torch.is_tensor(_)
+                ):
+                    with torch.no_grad():
+                        logit_norm_val = (
+                            torch.linalg.vector_norm(
+                                _.detach(), dim=-1, dtype=torch.float32
+                            )
+                            .mean()
+                            .item()
+                        )
                 metrics = None
                 if type(loss) is dict:
                     metrics = {k: v for k, v in loss.items() if k != "total"}
@@ -596,20 +613,9 @@ if __name__ == "__main__":
         if master_process:
             approx_time = training_time_ms + 1000 * (time.time() - t0)
             lr = optimizers[0].param_groups[0]["lr"]
-            # Logit-norm probe (arXiv 2610.38277): mean output logit L2 norm,
-            # every 100 steps, always on. Early-warning signal for LM-head
-            # mean drift / logit growth. Cheap: one reduction every N steps.
             logit_norm_str = ""
-            if step % 100 == 0 and torch.is_tensor(step_logits):
-                with torch.no_grad():
-                    logit_norm = (
-                        torch.linalg.vector_norm(
-                            step_logits.detach(), dim=-1, dtype=torch.float32
-                        )
-                        .mean()
-                        .item()
-                    )
-                logit_norm_str = f" logit_norm:{logit_norm:.2f}"
+            if logit_norm_val is not None:
+                logit_norm_str = f" logit_norm:{logit_norm_val:.2f}"
             if metrics is None:
                 print(
                     f"step:{step+1}/{args.num_iterations} lr:{lr} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms{logit_norm_str}"
