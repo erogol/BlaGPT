@@ -4,6 +4,38 @@ from typing import List
 import torch
 
 
+def describe_update_paths(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    name_keys: tuple = ("wte", "embed", "lm_head"),
+) -> List[str]:
+    """Runtime probe: which update rule touched each embedding-like tensor.
+
+    Call after the first optimizer.step(). The rule is read from the
+    optimizer state that the step created: ``sgd_momentum_buffer`` (F102
+    SGD-M group), ``momentum_buffer`` (Aurora), ``moment1`` (AdamW backup).
+    """
+    head = getattr(getattr(model, "lm_head", None), "weight", None)
+    lines = []
+    for name, p in model.named_parameters():
+        if not any(key in name for key in name_keys):
+            continue
+        state = optimizer.state.get(p, {})
+        if "sgd_momentum_buffer" in state:
+            path = "sgd_m"
+        elif "momentum_buffer" in state:
+            path = "aurora"
+        elif "moment1" in state:
+            path = "adamw"
+        else:
+            path = "none"
+        lines.append(
+            f"[update_path_probe step=1] param={name} shape={tuple(p.shape)} "
+            f"tied_lm_head={p is head} path={path} state_keys={sorted(state.keys())}"
+        )
+    return lines
+
+
 def get_optimizer(
     optimizer_name: str,
     optimizer_params: dict,

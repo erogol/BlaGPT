@@ -192,6 +192,44 @@ def test_probe_reports_sgd_m_when_flag_on():
 
 
 # ---------------------------------------------------------------------------
+# 5b. Step-1 runtime probe: reads the update path from optimizer state.
+# ---------------------------------------------------------------------------
+def _one_step(model, args):
+    opt = get_optimizer("Aurora", args, lr=0.05, model=model)
+    idx = torch.randint(0, 16, (2, 6))
+    target = torch.randint(0, 16, (2, 6))
+    loss = nn.functional.cross_entropy(model(idx).reshape(-1, 16), target.reshape(-1))
+    loss.backward()
+    opt.step()
+    return opt
+
+def test_update_path_probe_flag_off_reports_aurora():
+    from optimizers import describe_update_paths
+
+    torch.manual_seed(9)
+    model = TiedTinyModel()
+    opt = _one_step(model, dict(AURORA_ARGS))
+    lines = describe_update_paths(model, opt)
+    assert len(lines) == 1, lines
+    assert "param=transformer.wte.weight" in lines[0]
+    assert "tied_lm_head=True" in lines[0]
+    assert "path=aurora" in lines[0]
+
+def test_update_path_probe_flag_on_reports_sgd_m():
+    from optimizers import describe_update_paths
+
+    torch.manual_seed(10)
+    model = TiedTinyModel()
+    args = dict(AURORA_ARGS)
+    args["lm_head_sgd_m"] = True
+    args["lm_head_sgd_lr"] = 0.01
+    opt = _one_step(model, args)
+    lines = describe_update_paths(model, opt)
+    assert len(lines) == 1, lines
+    assert "tied_lm_head=True" in lines[0]
+    assert "path=sgd_m" in lines[0]
+
+# ---------------------------------------------------------------------------
 # 6. Flag on without an lm_head must fail loudly, not silently.
 # ---------------------------------------------------------------------------
 def test_flag_on_without_lm_head_raises():

@@ -5,7 +5,7 @@ import random
 import sys
 
 from coqpit import Coqpit
-from optimizers import get_optimizer
+from optimizers import describe_update_paths, get_optimizer
 from utils import get_model
 
 with open(sys.argv[0]) as f:
@@ -452,7 +452,9 @@ if __name__ == "__main__":
                 for _ in range(val_steps):
                     x_val, y_val = val_loader.next_batch()
                     with ctx:  # of course, we'd like to use no_grad() here too, but that creates a torch.compile error for some reason
-                        _, loss = model(x_val, y_val)
+                        # same name as the train forward: keeps the old `_`
+                        # tensor lifetime, so peak memory is unchanged
+                        step_logits, loss = model(x_val, y_val)
                         metrics = None
                         if type(loss) is dict:
                             metrics = {k: v for k, v in loss.items() if k != "total"}
@@ -548,12 +550,12 @@ if __name__ == "__main__":
             # forward pass
             with ctx:
                 if use_short_sequence:
-                    logits, loss = model(
+                    step_logits, loss = model(
                         x[:, :curriculum_len].contiguous(),
                         y[:, :curriculum_len].contiguous(),
                     )
                 else:
-                    logits, loss = model(x, y)
+                    step_logits, loss = model(x, y)
                 metrics = None
                 if type(loss) is dict:
                     metrics = {k: v for k, v in loss.items() if k != "total"}
@@ -577,6 +579,12 @@ if __name__ == "__main__":
         for opt, sched in zip(optimizers, schedulers):
             opt.step()
             sched.step()
+        # F102 runtime probe: after step 1, report which update rule touched
+        # the tied embedding / lm_head tensor (read from optimizer state).
+        if master_process and step == 0:
+            for opt in optimizers:
+                for line in describe_update_paths(raw_model, opt):
+                    print(line)
         # null the gradients
         model.zero_grad(set_to_none=True)
         if ema is not None:
@@ -592,11 +600,11 @@ if __name__ == "__main__":
             # every 100 steps, always on. Early-warning signal for LM-head
             # mean drift / logit growth. Cheap: one reduction every N steps.
             logit_norm_str = ""
-            if step % 100 == 0 and torch.is_tensor(logits):
+            if step % 100 == 0 and torch.is_tensor(step_logits):
                 with torch.no_grad():
                     logit_norm = (
                         torch.linalg.vector_norm(
-                            logits.detach(), dim=-1, dtype=torch.float32
+                            step_logits.detach(), dim=-1, dtype=torch.float32
                         )
                         .mean()
                         .item()
