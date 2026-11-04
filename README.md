@@ -113,6 +113,8 @@ Rotary (RoPE) replaces GRAPE-A (E7a) - [paper](https://arxiv.org/abs/2104.09864)
 
 👑 RoVE on rotary (E7b) - [paper](https://arxiv.org/abs/2606.11275) | [explanation](./techniques/rove.md) - best_model_loss: `3.1134` -> new_best_model_loss: `3.1106` - peak memory: `85258 MiB` (seed-2 run) - step_avg: `1018.28ms` - rotates each value by its own position and un-rotates the attention output by the query position; zero new parameters; seed 2: `3.1250` -> `3.1240`; small gain on both seeds; active best config uses `pos_encoding="rotary"`, `rove=true`.
 
+LM-head SGD-M (F102) - [paper](https://arxiv.org/abs/2610.38277) - best_model_loss: `3.1106` -> loss: `3.1782` - peak memory: `85774 MiB` (8x H200) - step_avg: `1010.87ms` (8x H200) - trains the output head with SGD + momentum 0.99 and keeps Aurora for all other weights (the paper's fix for Adam-driven LM-head mean drift and logit growth); before this change the tied embedding/head was trained by Aurora's spectral update, not AdamW; untied head at SGD-M lr 0.3 (F102u, +38.6M params) `3.1782` vs the untied AdamW-head control (F102u_ctrl) `3.1121`; tied head at lr 0.1 (F102c, also moves the input embedding to SGD-M) `3.2025`; E7b control on the same 8x H200 node and seed `3.1113`; on the older F99 stack (F102a, tied, lr 0.1) `3.1603` -> `3.2244`; SGD-M keeps the mean output logit norm at 0.16-0.64x the control (step 5001: `593` vs `1408` for the untied AdamW head and `926` for the tied Aurora head) but costs 0.07-0.09 val loss in 5100 steps - did not beat; not in the best config.
+
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
