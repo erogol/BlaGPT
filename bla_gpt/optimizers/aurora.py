@@ -16,7 +16,51 @@ momentum after `rail_engage_step` steps. When disabled, behavior is
 byte-identical to the vendored implementation above.
 """
 
+import math
+
 import torch
+
+
+@torch.no_grad()
+def top_singular_pair(M: torch.Tensor, iters: int = 10, eps: float = 1e-12):
+    """Leading singular pair (u1, v1) of a 2D matrix by rank-one power iteration.
+
+    F104 SAMuon-lite (arXiv 2608.25990, Algorithm 1 line 12). Stateless and
+    deterministic: starts from the largest-norm row of ``M`` (that row has a
+    non-zero overlap sigma_1 * u1[i] with v1). Runs in float32.
+    """
+    A = M.float()
+    v = A[A.norm(dim=1).argmax()].clone()
+    v = v / v.norm().clamp_min(eps)
+    for _ in range(iters):
+        u = A @ v
+        u = u / u.norm().clamp_min(eps)
+        v = A.mT @ u
+        v = v / v.norm().clamp_min(eps)
+    u = A @ v
+    u = u / u.norm().clamp_min(eps)
+    return u, v
+
+
+def samuon_gamma_t(gamma: float, step: int, warmup_steps: int) -> float:
+    """Cosine-warmed tail boost gamma_t = 1 + (gamma - 1) * w_t (paper G.3)."""
+    w = 0.5 * (1.0 - math.cos(math.pi * min(step / max(warmup_steps, 1), 1.0)))
+    return 1.0 + (gamma - 1.0) * w
+
+
+@torch.no_grad()
+def samuon_lite_reallocate(O: torch.Tensor, u: torch.Tensor, v: torch.Tensor, gamma_t: float):
+    """Head-anchored two-level allocation on a whitened update ``O``.
+
+    Returns gamma_t * O - (gamma_t - 1) * c * u v^T with c = u^T O v: the
+    component of ``O`` on the momentum head direction u v^T keeps its base
+    value, and everything orthogonal to it is scaled by gamma_t. Under exact
+    whitening (O = U V^T) c = 1, so this equals paper Eq. 8 with k = 1.
+    """
+    O32 = O.float()
+    c = u @ O32 @ v
+    out = gamma_t * O32 - (gamma_t - 1.0) * c * torch.outer(u, v)
+    return out.to(O.dtype)
 
 
 @torch.no_grad()
@@ -64,6 +108,10 @@ def aurora(
     step=0,
     rail_engage_step=514,
     rail_fast_weight=0.4385,
+    samuon_lite=False,
+    samuon_gamma=10.0,
+    samuon_warmup_steps=1530,
+    samuon_power_iters=10,
 ):
     """Aurora update rule. Vendored from aurora-release/src/aurora.py.
 
@@ -74,6 +122,12 @@ def aurora(
     when enabled, ``momentum_slow`` is an additional caller-managed EMA buffer
     (beta=``slow_beta``) that gets blended into the fast rail with weight
     ``rail_fast_weight`` once ``step >= rail_engage_step``.
+
+    Optional SAMuon-lite mode (F104, arXiv 2608.25990, off by default): the
+    leading singular pair (u1, v1) of the pre-polar update matrix is found by
+    power iteration; after the leverage-aware polar, the update component on
+    u1 v1^T keeps its base scale and the rest is scaled by the cosine-warmed
+    tail boost gamma_t (``samuon_gamma`` after ``samuon_warmup_steps``).
     """
     if W.ndim != 2:
         raise ValueError(f"aurora expects 2D weight tensors, got shape {tuple(W.shape)}")
@@ -109,6 +163,9 @@ def aurora(
     else:
         # Clone when not using Nesterov to avoid scaling the momentum buffer in-place below.
         update = G.lerp_(momentum, mu) if nesterov else momentum.clone()
+    if samuon_lite:
+        # F104: head of the matrix that gets whitened (paper: PowerIter(M)).
+        head_u, head_v = top_singular_pair(update, iters=samuon_power_iters)
     # Aurora's leverage-uniform polar via diagonal preconditioning.
     m, n = update.size(-2), update.size(-1)
     if m == n:
@@ -131,6 +188,9 @@ def aurora(
                 row_sq = U.to(torch.float32).pow(2).sum(dim=-1, keepdim=True).clamp_(min=eps * eps)
                 D = D * (target_row_sq / row_sq).pow(pp_beta)
         update = U.mT if transposed else U
+    if samuon_lite:
+        gamma_t = samuon_gamma_t(samuon_gamma, step, samuon_warmup_steps)
+        update = samuon_lite_reallocate(update, head_u, head_v, gamma_t)
     if rms_match:
         # Kimi-style RMS matching (arXiv:2502.16982): scale the polar update so its
         # entry-wise RMS is ~0.2 for every matrix shape (matches AdamW's typical
@@ -178,6 +238,10 @@ class Aurora(torch.optim.Optimizer):
         rail_slow_beta: slow-rail EMA coefficient, used only if aurora_twin_rail.
         rail_engage_step: step at which the slow rail starts blending in.
         rail_fast_weight: fast-rail weight in the blend after rail_engage_step.
+        samuon_lite: enable F104 SAMuon-lite head-anchored allocation (default off).
+        samuon_gamma: tail boost gamma (paper Table 3, bs 1024 at 124M: 10).
+        samuon_warmup_steps: cosine warmup of gamma_t (paper: 30% of training).
+        samuon_power_iters: rank-one power iterations (paper G.6, 124M: 10).
     """
 
     def __init__(
@@ -202,6 +266,10 @@ class Aurora(torch.optim.Optimizer):
         rail_slow_beta=0.98,
         rail_engage_step=514,
         rail_fast_weight=0.4385,
+        samuon_lite=False,
+        samuon_gamma=10.0,
+        samuon_warmup_steps=1530,
+        samuon_power_iters=10,
         **kwargs,
     ):
         defaults = dict(
@@ -220,6 +288,10 @@ class Aurora(torch.optim.Optimizer):
             rail_slow_beta=rail_slow_beta,
             rail_engage_step=rail_engage_step,
             rail_fast_weight=rail_fast_weight,
+            samuon_lite=samuon_lite,
+            samuon_gamma=samuon_gamma,
+            samuon_warmup_steps=samuon_warmup_steps,
+            samuon_power_iters=samuon_power_iters,
         )
         aurora_params = list(aurora_params) if aurora_params is not None else []
         adamw_params = list(adamw_params) if adamw_params is not None else []
@@ -289,6 +361,7 @@ class Aurora(torch.optim.Optimizer):
                 if group["aurora_twin_rail"]:
                     if "momentum_buffer_slow" not in state:
                         state["momentum_buffer_slow"] = torch.zeros_like(w2d)
+                if group["aurora_twin_rail"] or group["samuon_lite"]:
                     state["step"] = state.get("step", 0) + 1
                 aurora(
                     w2d,
@@ -308,6 +381,10 @@ class Aurora(torch.optim.Optimizer):
                     step=state.get("step", 0),
                     rail_engage_step=group["rail_engage_step"],
                     rail_fast_weight=group["rail_fast_weight"],
+                    samuon_lite=group["samuon_lite"],
+                    samuon_gamma=group["samuon_gamma"],
+                    samuon_warmup_steps=group["samuon_warmup_steps"],
+                    samuon_power_iters=group["samuon_power_iters"],
                 )
 
             ############################
