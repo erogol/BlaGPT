@@ -373,8 +373,25 @@ class Attention(nn.Module):
     def _project_kv(self, x, B, T):
         kv = self.kv_proj(x).view(B, T, 2, self.n_kv_head, self.head_dim)
         k, v = kv.unbind(dim=2)
+        v = self._apply_embed_value_residual(v, B, T)
         v = self._apply_value_residual(v)
         return k, v
+
+    def _apply_embed_value_residual(self, v, B, T):
+        # Embedding value residual (F103, Ripple-65B "valres"): V is projected
+        # from lerp(e, h, sigmoid(lam)), e = RMS-normed token embedding, h =
+        # this block's normed input. kv_proj is linear, so this equals
+        # lerp(W_v e + b_v, W_v h + b_v, s). Holder/lambda attached by
+        # GPT._init_embed_value_residual; absent => no-op.
+        holder = getattr(self, "ev_res_holder", None)
+        if holder is None:
+            return v
+        half = self.kv_proj.out_features // 2
+        b_v = None if self.kv_proj.bias is None else self.kv_proj.bias[half:]
+        v_e = F.linear(holder["e"], self.kv_proj.weight[half:], b_v)
+        v_e = v_e.view(B, T, self.n_kv_head, self.head_dim).to(v.dtype)
+        s = torch.sigmoid(self.ev_res_lambda).to(v.dtype)
+        return v_e + s * (v - v_e)
 
     def _apply_value_residual(self, v):
         # Value Residual Learning (arXiv:2410.17897, learnable-plus), composable

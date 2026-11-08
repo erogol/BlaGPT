@@ -148,6 +148,7 @@ class GPTConfig(Coqpit):
     use_composable_gated_attn: bool = False  # Composable Gated Attention (arXiv:2505.06708) on top of GOAT sink
     attn_res_block_size: int = 0  # Block AttnRes: attend over block-level sums (0 = full per-layer AttnRes)
     use_value_residual: bool = False  # Value Residual Learning (arXiv:2410.17897): learnable-plus mix of first-layer V into deeper layers
+    use_embed_value_residual: bool = False  # F103 (Ripple-65B valres): each layer projects V from lerp(normed token embedding, normed hidden, sigmoid(lam_l)), lam_l init 0
     use_affine_scaled_attn: bool = False  # Affine-Scaled Attention (arXiv:2602.23057): [alpha*softmax + beta] @ V with EMA-tracked beta
     affine_attn_momentum: float = 0.95  # EMA momentum rho for alpha_ma in affine-scaled attention
     use_unet_skips: bool = False  # U-net long skips (F87, modded-nanogpt lineage): decoder layer i adds w_i * encoder(n-1-i) output
@@ -835,6 +836,7 @@ class GPT(nn.Module):
         self.apply(self._init_weights)
         self._init_attn_res()
         self._init_value_residual()
+        self._init_embed_value_residual()
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith("alpha_proj.weight"):
@@ -981,6 +983,19 @@ class GPT(nn.Module):
             block.attn.v_res_holder = self._v_res_holder
             block.attn.v_res_depth = i
 
+    def _init_embed_value_residual(self):
+        # F103 embedding value residual (Ripple-65B, ricursiveAI 2026,
+        # modeling_ricursive.py): one scalar lam per layer, init 0, so V comes
+        # from a 50/50 blend of embedding and hidden state at init.
+        if not getattr(self.config, "use_embed_value_residual", False):
+            return
+        self._ev_res_holder = {}
+        for block in self.transformer.h:
+            if type(block.attn)._project_kv is not Attention._project_kv:
+                raise ValueError("use_embed_value_residual needs the base Attention._project_kv")
+            block.attn.ev_res_holder = self._ev_res_holder
+            block.attn.ev_res_lambda = nn.Parameter(torch.zeros(1))
+
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
@@ -1011,6 +1026,8 @@ class GPT(nn.Module):
 
         _attn_res = getattr(self.config, "use_attn_res", False) and not self.config.use_hyper_connections
         _ar_bs = getattr(self.config, "attn_res_block_size", 0)
+        if getattr(self.config, "use_embed_value_residual", False):
+            self._ev_res_holder["e"] = F.rms_norm(x, (x.size(-1),))
         if getattr(self.config, "use_value_residual", False):
             self._v_res_holder["v1"] = None
             self._v_res_holder["lam1"] = F.softmax(self.v_res_logits, dim=0) * self.v_res_scale
