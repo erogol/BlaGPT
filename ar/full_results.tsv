@@ -61,3 +61,4 @@ F102u	877ef9d	E7b	3.1782	discard	untied_lm_head_sgdm_lr0.3_on_E7b	bla_gpt/logs/a
 F102u_ctrl	5d5d3d8	E7b	3.1121	discard	untied_lm_head_adamw_ctrl_on_E7b	bla_gpt/logs/ar_full_F102u_ctrl_0/state_step005100.pt	Full 5100-step run; +0.0015 vs best E7b=3.1106; no confirmation because not lower
 F103	51d1eb7	E7b	3.1136	discard	embed_value_residual_ripple	bla_gpt/logs/ar_full_F103_0/state_step005100.pt	Full 5100-step run; +0.0030 vs best E7b=3.1106; no confirmation because not lower
 F103r	c3906a0	E7b	3.1164	discard	embed_value_residual_replace_resformer	bla_gpt/logs/ar_full_F103r_0/state_step005100.pt	Full 5100-step run; +0.0058 vs best E7b=3.1106; no confirmation because not lower
+F104	f5b062d	E7b	3.2877	discard	samuon_lite_gamma10_on_E7b	bla_gpt/logs/ar_full_F104_0/state_step005100.pt	Full 5100-step run; +0.1771 vs best E7b=3.1106; no confirmation because not lower
