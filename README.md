@@ -117,6 +117,8 @@ LM-head SGD-M (F102) - [paper](https://arxiv.org/abs/2610.38277) - best_model_lo
 
 Embedding value residual (F103) - [Ripple-65B](https://huggingface.co/ricursiveAI/Ripple-65B-Preview) - best_model_loss: `3.1106` -> loss: `3.1136` - peak memory: `86422 MiB` (8x H200) - step_avg: `1014.35ms` (8x H200) - each layer projects V from lerp(RMS-normed token embedding, normed layer input, sigmoid(lambda)), one zero-init lambda per layer (Ripple "valres"); on top of the E7b stack with ResFormer value residual kept `3.1136`; replacing ResFormer (F103r) `3.1164`; E7b control on the same 8x H200 setup and seed `3.1113` - did not beat; not in the best config.
 
+SAMuon-lite in Aurora (F104) - [paper](https://arxiv.org/abs/2608.25990) - best_model_loss: `3.1106` -> loss: `3.2877` - peak memory: `85258 MiB` (8x H200) - step_avg: `1115.44ms` (8x H200) - head-anchored two-level spectral allocation: a 10-step rank-one power iteration finds the top singular pair of the pre-polar update, the update component on u1 v1^T keeps the Aurora scale and every other direction is boosted by gamma=10 (paper default), cosine-warmed over the first 30% of steps; kept the E7b lr 0.03 (the paper runs SAMuon at about 0.71x the tuned Muon lr), so the bulk step is about 10x Aurora's; val loss trails the F103 run (E7b stack, same node) by 0.17-0.37 from step 750 on; E7b control on the same 8x H200 node and seed `3.1113`; +11% step time from the power iteration - did not beat; not in the best config.
+
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`

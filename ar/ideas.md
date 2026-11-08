@@ -390,3 +390,10 @@ Infra unblocks pending: fla + flash_attn pip install running (/tmp/pip_install.l
 - Tests: tests/test_samuon_lite_f104.py (flag off bit-identical on CPU and GPU, power iteration vs explicit SVD, head keeps base scale and bulk scales by gamma vs explicit SVD, gamma = 1 identity and cosine warmup, finite updates with the E7b param groups and tied head, state_dict round trip).
 - Configs: ar/full_train/configs/F104.json (E7b_h200_control + flags), F104_s2.json (seed 2, compare with E7b_s2 = 3.1240), F104_smoke.json (E7b_smoke_resume + flags, warmup 6 steps so the 20-step smoke hits full gamma).
 - Decision rule: discard if not below 3.1106 or worse than the same-node E7b control 3.1113; one seed-2 run before any keep; best_config changes only if both seeds beat their E7b references.
+
+## F104 result — SAMuon-lite in Aurora (2026-11-08)
+- Full run (seed 1337, node g402, 8x H200, commit f5b062d): val_loss 3.2877, exit 0. Gap +0.1771 vs best E7b 3.1106 and +0.1764 vs same-node E7b control 3.1113. step_avg 1115.44 ms (+11.2% vs E7b 1003 ms; the per-step power iteration). Peak memory 85258 MiB. Smoke: step 20/20 val_loss 7.0706.
+- Curve: 750 4.4297, 1000 4.4456, 1750 3.7876, 2500 3.5846, 3250 3.5946, 4000 3.5387, 4500 3.3947, 5000 3.2966, 5100 3.2877. F103 (E7b stack, same node) at the same steps: 750 4.0559, 1750 3.4813, 2500 3.4128, 3250 3.3620. The gap opens during the gamma warmup and stays at 0.17-0.37; the loss stalls or rises between 1500 and 3375 with gamma = 10 at full lr.
+- Verdict: DISCARD. No seed-2 run (rule: not below 3.1106). best_config unchanged. Max-2-runs budget used: 1.
+- Read: at the E7b lr 0.03, a 10x bulk boost is far too large a step for Aurora. The paper pairs SAMuon with a lower base step (spectral radius 50 vs tuned Muon 70.71). If SAMuon is retried, scale lr by 1/gamma-ish or use gamma 2-3; not planned.
+- Logs: /data/tts/erogol/blagpt_f104_20261108 (F104 run folder, smoke log, queue/setup logs, tests log, patch, bundle).
