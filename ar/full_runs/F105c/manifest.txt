@@ -1,0 +1,6 @@
+started_utc=2026-11-09T00:14:36Z
+git_commit=4a4faef65cb4d45aded1873a90c50e68f578c658
+run_name=ar_full_F105c
+config=ar/full_runs/F105c/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_F105c_0
