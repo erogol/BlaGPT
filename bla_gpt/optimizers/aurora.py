@@ -64,6 +64,41 @@ def samuon_lite_reallocate(O: torch.Tensor, u: torch.Tensor, v: torch.Tensor, ga
 
 
 @torch.no_grad()
+def normuon_row_normalize(
+    update: torch.Tensor, second_moment: torch.Tensor, beta2: float = 0.95, eps: float = 1e-10
+) -> torch.Tensor:
+    """F105 NorMuon neuron-wise normalization (arXiv 2510.05491, Algorithm 1 lines 7-9).
+
+    Applied after orthogonalization. ``second_moment`` (shape ``(rows, 1)``,
+    float32, caller-managed) is an EMA over steps of each row's mean squared
+    entry; each row (output neuron) is divided by ``sqrt(v) + eps``. As in the
+    reference code (github.com/zichongli5/NorMuon, normuon.py) the result is
+    rescaled so its Frobenius norm equals the pre-normalization norm, which
+    keeps the base optimizer's step size. Returns float32 (both reference
+    implementations cast the polar output to float32 before this step).
+    """
+    O = update.float()
+    norm_before = O.norm()
+    second_moment.lerp_(O.pow(2).mean(dim=-1, keepdim=True), 1 - beta2)
+    O = O / (second_moment.sqrt() + eps)
+    return O * (norm_before / (O.norm() + eps))
+
+
+@torch.no_grad()
+def cautious_decay_(W: torch.Tensor, update: torch.Tensor, decay: float) -> torch.Tensor:
+    """F105 cautious weight decay (arXiv 2510.12402, Algorithm 1), in place.
+
+    ``W <- W - decay * I(update * W >= 0) * W`` entrywise, where ``update`` is
+    the step that gets subtracted (``W <- W - eta * update``) and
+    ``decay = eta * lambda``. Entries where the update would grow ``|W|``
+    are not decayed.
+    """
+    mask = (update.float() * W.float()) >= 0
+    W.addcmul_(W, mask.to(W.dtype), value=-decay)
+    return W
+
+
+@torch.no_grad()
 def polar(G: torch.Tensor) -> torch.Tensor:
     """Polar factor via 12-step simple-quintic Newton-Schulz.
 
@@ -112,6 +147,11 @@ def aurora(
     samuon_gamma=10.0,
     samuon_warmup_steps=1530,
     samuon_power_iters=10,
+    cautious_wd=False,
+    normuon=False,
+    normuon_v=None,
+    normuon_beta2=0.95,
+    normuon_eps=1e-10,
 ):
     """Aurora update rule. Vendored from aurora-release/src/aurora.py.
 
@@ -128,6 +168,12 @@ def aurora(
     power iteration; after the leverage-aware polar, the update component on
     u1 v1^T keeps its base scale and the rest is scaled by the cosine-warmed
     tail boost gamma_t (``samuon_gamma`` after ``samuon_warmup_steps``).
+
+    Optional F105 modes (off by default): ``normuon`` applies NorMuon's
+    per-row second-moment normalization (``normuon_v`` is the caller-managed
+    ``(rows, 1)`` EMA buffer) after the leverage-aware polar and before the
+    aspect-ratio scaling; ``cautious_wd`` replaces the decoupled decay by
+    cautious weight decay masked with the final update.
     """
     if W.ndim != 2:
         raise ValueError(f"aurora expects 2D weight tensors, got shape {tuple(W.shape)}")
@@ -191,6 +237,10 @@ def aurora(
     if samuon_lite:
         gamma_t = samuon_gamma_t(samuon_gamma, step, samuon_warmup_steps)
         update = samuon_lite_reallocate(update, head_u, head_v, gamma_t)
+    if normuon:
+        if normuon_v is None:
+            raise ValueError("normuon=True requires a normuon_v buffer")
+        update = normuon_row_normalize(update, normuon_v, beta2=normuon_beta2, eps=normuon_eps)
     if rms_match:
         # Kimi-style RMS matching (arXiv:2502.16982): scale the polar update so its
         # entry-wise RMS is ~0.2 for every matrix shape (matches AdamW's typical
@@ -205,7 +255,10 @@ def aurora(
             "Check for NaN/Inf in gradients or an ill-conditioned weight matrix."
         )
     # Decoupled weight decay then apply.
-    W.mul_(1 - eta * weight_decay)
+    if cautious_wd:
+        cautious_decay_(W, update, eta * weight_decay)
+    else:
+        W.mul_(1 - eta * weight_decay)
     W.add_(update, alpha=-eta)
     return W
 
@@ -270,6 +323,10 @@ class Aurora(torch.optim.Optimizer):
         samuon_gamma=10.0,
         samuon_warmup_steps=1530,
         samuon_power_iters=10,
+        cautious_wd=False,
+        normuon=False,
+        normuon_beta2=0.95,
+        normuon_eps=1e-10,
         **kwargs,
     ):
         defaults = dict(
@@ -292,6 +349,10 @@ class Aurora(torch.optim.Optimizer):
             samuon_gamma=samuon_gamma,
             samuon_warmup_steps=samuon_warmup_steps,
             samuon_power_iters=samuon_power_iters,
+            cautious_wd=cautious_wd,
+            normuon=normuon,
+            normuon_beta2=normuon_beta2,
+            normuon_eps=normuon_eps,
         )
         aurora_params = list(aurora_params) if aurora_params is not None else []
         adamw_params = list(adamw_params) if adamw_params is not None else []
@@ -361,6 +422,10 @@ class Aurora(torch.optim.Optimizer):
                 if group["aurora_twin_rail"]:
                     if "momentum_buffer_slow" not in state:
                         state["momentum_buffer_slow"] = torch.zeros_like(w2d)
+                if group.get("normuon", False) and "normuon_v" not in state:
+                    state["normuon_v"] = torch.zeros(
+                        w2d.size(0), 1, dtype=torch.float32, device=w2d.device
+                    )
                 if group["aurora_twin_rail"] or group["samuon_lite"]:
                     state["step"] = state.get("step", 0) + 1
                 aurora(
@@ -385,6 +450,11 @@ class Aurora(torch.optim.Optimizer):
                     samuon_gamma=group["samuon_gamma"],
                     samuon_warmup_steps=group["samuon_warmup_steps"],
                     samuon_power_iters=group["samuon_power_iters"],
+                    cautious_wd=group.get("cautious_wd", False),
+                    normuon=group.get("normuon", False),
+                    normuon_v=state.get("normuon_v"),
+                    normuon_beta2=group.get("normuon_beta2", 0.95),
+                    normuon_eps=group.get("normuon_eps", 1e-10),
                 )
 
             ############################
