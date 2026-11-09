@@ -119,6 +119,10 @@ Embedding value residual (F103) - [Ripple-65B](https://huggingface.co/ricursiveA
 
 SAMuon-lite in Aurora (F104) - [paper](https://arxiv.org/abs/2608.25990) - best_model_loss: `3.1106` -> loss: `3.2877` - peak memory: `85258 MiB` (8x H200) - step_avg: `1115.44ms` (8x H200) - head-anchored two-level spectral allocation: a 10-step rank-one power iteration finds the top singular pair of the pre-polar update, the update component on u1 v1^T keeps the Aurora scale and every other direction is boosted by gamma=10 (paper default), cosine-warmed over the first 30% of steps; kept the E7b lr 0.03 (the paper runs SAMuon at about 0.71x the tuned Muon lr), so the bulk step is about 10x Aurora's; val loss trails the F103 run (E7b stack, same node) by 0.17-0.37 from step 750 on; E7b control on the same 8x H200 node and seed `3.1113`; +11% step time from the power iteration - did not beat; not in the best config.
 
+Cautious weight decay in Aurora (F105c) - [paper](https://arxiv.org/abs/2510.12402) - best_model_loss: `3.1106` -> loss: `3.1134` - peak memory: `85258 MiB` (8x H200) - step_avg: `1020.17ms` (8x H200) - Aurora's decoupled decay applied only to entries where update * W >= 0 (no new hyperparameter, wd 0.025 kept), 2D Aurora params only, as in IMU-1 ([arXiv 2602.02522](https://arxiv.org/abs/2602.02522)); 0.03-0.05 below the F103 curve mid-run, the gap closes in warmdown; E7b control on the same 8x H200 node and seed `3.1113` - did not beat; not in the best config.
+
+NorMuon row normalization + cautious WD in Aurora (F105n) - [paper](https://arxiv.org/abs/2510.05491) - best_model_loss: `3.1106` -> loss: `3.1159` - peak memory: `85263 MiB` (8x H200) - step_avg: `1035.27ms` (8x H200) - after Aurora's leverage-aware polar, each output row is divided by the sqrt of an EMA (beta2 0.95) of its mean square, Frobenius norm kept (reference-code form), plus cautious WD (the IMU-1 recipe); tracks F105c within 0.002-0.004 after step 1200 and ends 0.0025 above it; E7b control on the same 8x H200 node and seed `3.1113` - did not beat; not in the best config.
+
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
