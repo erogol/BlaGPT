@@ -75,9 +75,9 @@ Exclusive Self Attention - [paper](https://arxiv.org/html/2603.09078v1) - best_m
 Hyper-Connections - [paper](https://arxiv.org/abs/2409.19606) | [explanation](./techniques/hyper_connections.md) - best_model_loss: `3.2327` -> loss: `3.2741` - train_loss: `3.2388` - peak memory: `68729 MiB` - step_avg: `928.26ms` - did not beat the old best
 
 
-### Auto Research Keeps (cumulative deltas)
+### Auto Research Results
 
-Each row below is a greedy delta on top of the previous best stack. `best_model_loss` is the prior stack; `new_best_model_loss` is the prior stack plus the listed change. These are not standalone-vs-vanilla results.
+Each row adds one change on top of the best model so far. `best_model_loss` is the loss before the change, the second number is the loss after it.
 
 GOAT Sink Prior - [paper](https://arxiv.org/abs/2601.15380) | [explanation](./techniques/goat_sink_prior.md) - best_model_loss: `3.2354` -> new_best_model_loss: `3.2298` - peak memory: `52231 MiB` - step_avg: `377.61ms`
 
@@ -91,37 +91,35 @@ Composable Value Residual - [paper](https://arxiv.org/abs/2410.17897) | [explana
 
 U-net Long Skips - [source](https://github.com/KellerJordan/modded-nanogpt) | [explanation](./techniques/unet_skips.md) - best_model_loss: `3.2011` -> new_best_model_loss: `3.1979` - peak memory: `58632 MiB` - step_avg: `494.31ms`
 
-Learning-rate ×1.4 sweep (F90) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> loss: `3.2014` - peak memory: `58632 MiB` - step_avg: `492.86ms` - did not beat; INVALID/NO-OP because the intended `learning_rate=0.0014` was not applied (logged peak lr `0.001`).
+Learning rate 0.001 -> 0.0014 - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1965` - peak memory: `58632 MiB` - step_avg: `491.00ms`
 
-Learning-rate ×1.4 validated and confirmed (F90r/F90r2) - [Muon source](https://kellerjordan.github.io/posts/muon/) - best_model_loss: `3.1979` -> new_best_model_loss: `3.1965` - first run: `3.1972`; independent confirmation: `3.1965` - peak memory: `58632 MiB` - step_avg: `491.00ms` - confirmed keep; active best config uses `learning_rate=0.0014`.
+GRAPE-A Positional Encoding - [paper](https://arxiv.org/abs/2512.07805) | [explanation](./techniques/grape_a_qgate.md) - best_model_loss: `3.1965` -> new_best_model_loss: `3.1897` - peak memory: `59643 MiB` - step_avg: `580.32ms` - replaces RoPE; later replaced again by RoPE + RoVE
 
-GRAPE-A Query-Gated Positional Encoding (F94) - [paper](https://arxiv.org/abs/2512.07805) | [explanation](./techniques/grape_a_qgate.md) - best_model_loss: `3.1965` -> new_best_model_loss: `3.1897` - peak memory: `59643 MiB` - step_avg: `580.32ms` - replaces RoPE with query-gated additive position bias; confirmed keep; later replaced by rotary + RoVE (E7a/E7b).
+Aurora Optimizer - [paper](https://arxiv.org/abs/2606.27715) | [explanation](./techniques/aurora.md) - best_model_loss: `3.1897` -> new_best_model_loss: `3.1603` - peak memory: `59643 MiB` - step_avg: `721.25ms` - replaces Muon, `learning_rate=0.03`
 
-Aurora Optimizer (F99) - [paper](https://arxiv.org/abs/2606.27715) | [explanation](./techniques/aurora.md) - best_model_loss: `3.1897` -> new_best_model_loss: `3.1603` - peak memory: `59643 MiB` - step_avg: `721.25ms` - replaces Muon with leverage-aware spectral updates at `learning_rate=0.03`; clean keep; active best config uses `optimizer_name="Aurora"`.
+Weight EMA + LR floor - best_model_loss: `3.1603` -> new_best_model_loss: `3.1487` - peak memory: `61239 MiB` - step_avg: `731.65ms` - LR decays to 15% of peak, not to 0, and eval uses the average weights of the last 300 steps; later removed, no gain on the newer model
 
-Weight EMA + LR floor (E1c) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1487` - peak memory: `61239 MiB` - step_avg: `731.65ms` - warmdown floors at 0.15x peak lr (`final_lr_frac=0.15`) plus a trailing weight EMA over the last 300 steps used at eval (`ema_last_steps=300`); clean keep; later dropped from the best config (no gain on the B0 stack, see C1 below).
+Token normalization for Engram - [PR #375](https://github.com/KellerJordan/modded-nanogpt/pull/375) | [explanation](./techniques/engram.md) - best_model_loss: `3.1603` -> loss: `3.1564` - peak memory: `59643 MiB` - step_avg: `719.88ms` - tokens with the same first 2 bytes share one Engram entry; did not beat the EMA result above; off by default
 
-Token normalization before n-gram hash (E3) - [PR #375](https://github.com/KellerJordan/modded-nanogpt/pull/375) | [explanation](./techniques/engram.md) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1564` - peak memory: `59643 MiB` - step_avg: `719.88ms` - groups vocab tokens sharing a first-2-byte BPE prefix into one n-gram hash class (config flag `engram_normalize_tokens=true` on MinimalEngram); parallel branch off F99, not off E1c; clean keep vs F99 (`3.1603`), but E1c (`3.1487`) remains the overall best; default stays off (`engram_normalize_tokens=False`).
+Engram vocab ×20 - [paper](https://github.com/deepseek-ai/Engram/blob/main/Engram_paper.pdf) | [explanation](./techniques/engram.md) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1446` - step_avg: `1077.31ms` - 4x larger Engram table (`engram_vocab_mult` 5 -> 20); about 49% slower
 
-Engram vocab ×20 (E2a/E2a_confirm) - [paper](https://github.com/deepseek-ai/Engram/blob/main/Engram_paper.pdf) | [explanation](./techniques/engram.md) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1446` - step_avg: `1077.31ms` - raises `engram_vocab_mult` from 5 to 20; first run `3.1578`, rerun `3.1446`; parallel branch off F99 without the E1c LR floor/EMA; beats E1c (`3.1487`); about 49% slower per step than F99 (`721ms`).
+Fixed seed re-run - best_model_loss: `3.1446` -> new_best_model_loss: `3.1265` - peak memory: `85625 MiB` - step_avg: `1065.74ms` - same config with `seed=1337` and newer code; the cause of the gain is not clear; second seed: `3.1241`
 
-Seeded re-baseline (B0) - best_model_loss: `3.1446` -> new_best_model_loss: `3.1265` - peak memory: `85625 MiB` - step_avg: `1065.74ms` - same config as E2a_confirm plus `seed=1337` and the merged E6-E8 code (all off by default); cause of the gain not isolated (seed vs code change); seed 2 repeat: `3.1241`. Adding the E1c LR floor + EMA on top (C1) gave `3.1280`, so the best config drops `final_lr_frac` and `ema_last_steps`.
+Multi-Head Attention Residuals - [paper](https://arxiv.org/abs/2607.27230) | [explanation](./techniques/mhar.md) - best_model_loss: `3.1265` -> loss: `3.1238` - peak memory: `93225 MiB` - step_avg: `1149.40ms` - about 8% slower; on top of RoPE + RoVE: `3.1106` -> `3.1113`, no gain
 
-Multi-Head Attention Residuals, H=8 (E6b) - [paper](https://arxiv.org/abs/2607.27230) | [explanation](./techniques/mhar.md) - best_model_loss: `3.1265` -> loss: `3.1238` - peak memory: `93225 MiB` (seed-2 run) - step_avg: `1149.40ms` - splits the depth-routing query of Attention Residuals into 8 heads; seed 2: `3.1241` -> `3.1203`; about 8% slower; on top of rotary + RoVE (Combined): `3.1106` -> `3.1113` - did not beat the new best; not in the best config.
+RoPE instead of GRAPE-A - [paper](https://arxiv.org/abs/2104.09864) - best_model_loss: `3.1265` -> new_best_model_loss: `3.1134` - peak memory: `85160 MiB` - step_avg: `993.42ms` - about 7% faster; no loss gain on a second seed
 
-Rotary (RoPE) replaces GRAPE-A (E7a) - [paper](https://arxiv.org/abs/2104.09864) - best_model_loss: `3.1265` -> new_best_model_loss: `3.1134` - peak memory: `85160 MiB` (seed-2 run) - step_avg: `993.42ms` - standard RoPE (`rope_theta=1e6`) instead of the GRAPE-A additive bias; about 7% faster than B0; seed 2: `3.1250` vs B0 seed 2 `3.1241` (no loss gain), so the speed gain holds but the loss gain is not confirmed.
+👑 RoVE - [paper](https://arxiv.org/abs/2606.11275) | [explanation](./techniques/rove.md) - best_model_loss: `3.1134` -> new_best_model_loss: `3.1106` - peak memory: `85258 MiB` - step_avg: `1018.28ms` - applies the rotary rotation to the values too; no new parameters; small gain on two seeds
 
-👑 RoVE on rotary (E7b) - [paper](https://arxiv.org/abs/2606.11275) | [explanation](./techniques/rove.md) - best_model_loss: `3.1134` -> new_best_model_loss: `3.1106` - peak memory: `85258 MiB` (seed-2 run) - step_avg: `1018.28ms` - rotates each value by its own position and un-rotates the attention output by the query position; zero new parameters; seed 2: `3.1250` -> `3.1240`; small gain on both seeds; active best config uses `pos_encoding="rotary"`, `rove=true`.
+LM-head SGD-M - [paper](https://arxiv.org/abs/2610.38277) - best_model_loss: `3.1106` -> loss: `3.1782` - peak memory: `85774 MiB` - step_avg: `1010.87ms` - trains the output layer with SGD + momentum; output logits stay smaller, but loss is 0.07-0.09 worse
 
-LM-head SGD-M (F102) - [paper](https://arxiv.org/abs/2610.38277) - best_model_loss: `3.1106` -> loss: `3.1782` - peak memory: `85774 MiB` (8x H200) - step_avg: `1010.87ms` (8x H200) - trains the output head with SGD + momentum 0.99 and keeps Aurora for all other weights (the paper's fix for Adam-driven LM-head mean drift and logit growth); before this change the tied embedding/head was trained by Aurora's spectral update, not AdamW; untied head at SGD-M lr 0.3 (F102u, +38.6M params) `3.1782` vs the untied AdamW-head control (F102u_ctrl) `3.1121`; tied head at lr 0.1 (F102c, also moves the input embedding to SGD-M) `3.2025`; E7b control on the same 8x H200 node and seed `3.1113`; on the older F99 stack (F102a, tied, lr 0.1) `3.1603` -> `3.2244`; SGD-M keeps the mean output logit norm at 0.16-0.64x the control (step 5001: `593` vs `1408` for the untied AdamW head and `926` for the tied Aurora head) but costs 0.07-0.09 val loss in 5100 steps - did not beat; not in the best config.
+Embedding value residual - [Ripple-65B](https://huggingface.co/ricursiveAI/Ripple-65B-Preview) - best_model_loss: `3.1106` -> loss: `3.1136` - peak memory: `86422 MiB` - step_avg: `1014.35ms` - mixes the token embedding into the values of each layer
 
-Embedding value residual (F103) - [Ripple-65B](https://huggingface.co/ricursiveAI/Ripple-65B-Preview) - best_model_loss: `3.1106` -> loss: `3.1136` - peak memory: `86422 MiB` (8x H200) - step_avg: `1014.35ms` (8x H200) - each layer projects V from lerp(RMS-normed token embedding, normed layer input, sigmoid(lambda)), one zero-init lambda per layer (Ripple "valres"); on top of the E7b stack with ResFormer value residual kept `3.1136`; replacing ResFormer (F103r) `3.1164`; E7b control on the same 8x H200 setup and seed `3.1113` - did not beat; not in the best config.
+SAMuon-lite in Aurora - [paper](https://arxiv.org/abs/2608.25990) - best_model_loss: `3.1106` -> loss: `3.2877` - peak memory: `85258 MiB` - step_avg: `1115.44ms` - most update directions get 10x larger steps, and the LR was not lowered for it; 11% slower
 
-SAMuon-lite in Aurora (F104) - [paper](https://arxiv.org/abs/2608.25990) - best_model_loss: `3.1106` -> loss: `3.2877` - peak memory: `85258 MiB` (8x H200) - step_avg: `1115.44ms` (8x H200) - head-anchored two-level spectral allocation: a 10-step rank-one power iteration finds the top singular pair of the pre-polar update, the update component on u1 v1^T keeps the Aurora scale and every other direction is boosted by gamma=10 (paper default), cosine-warmed over the first 30% of steps; kept the E7b lr 0.03 (the paper runs SAMuon at about 0.71x the tuned Muon lr), so the bulk step is about 10x Aurora's; val loss trails the F103 run (E7b stack, same node) by 0.17-0.37 from step 750 on; E7b control on the same 8x H200 node and seed `3.1113`; +11% step time from the power iteration - did not beat; not in the best config.
+Cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.12402) - best_model_loss: `3.1106` -> loss: `3.1134` - peak memory: `85258 MiB` - step_avg: `1020.17ms` - better in mid-training, but the gap closes at the end
 
-Cautious weight decay in Aurora (F105c) - [paper](https://arxiv.org/abs/2510.12402) - best_model_loss: `3.1106` -> loss: `3.1134` - peak memory: `85258 MiB` (8x H200) - step_avg: `1020.17ms` (8x H200) - Aurora's decoupled decay applied only to entries where update * W >= 0 (no new hyperparameter, wd 0.025 kept), 2D Aurora params only, as in IMU-1 ([arXiv 2602.02522](https://arxiv.org/abs/2602.02522)); 0.03-0.05 below the F103 curve mid-run, the gap closes in warmdown; E7b control on the same 8x H200 node and seed `3.1113` - did not beat; not in the best config.
-
-NorMuon row normalization + cautious WD in Aurora (F105n) - [paper](https://arxiv.org/abs/2510.05491) - best_model_loss: `3.1106` -> loss: `3.1159` - peak memory: `85263 MiB` (8x H200) - step_avg: `1035.27ms` (8x H200) - after Aurora's leverage-aware polar, each output row is divided by the sqrt of an EMA (beta2 0.95) of its mean square, Frobenius norm kept (reference-code form), plus cautious WD (the IMU-1 recipe); tracks F105c within 0.002-0.004 after step 1200 and ends 0.0025 above it; E7b control on the same 8x H200 node and seed `3.1113` - did not beat; not in the best config.
+NorMuon + cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.05491) - best_model_loss: `3.1106` -> loss: `3.1159` - peak memory: `85263 MiB` - step_avg: `1035.27ms`
 
 
 ## Other Models
@@ -185,7 +183,7 @@ Muon - [link](https://kellerjordan.github.io/posts/muon/) - loss: `3.2923`, peak
 
 AdaMuon - [paper](https://arxiv.org/abs/2507.11005) | [explanation](./techniques/adamuon.md) - Adaptive Muon with second-moment estimation (default optimizer)
 
-Aurora - [paper](https://arxiv.org/abs/2606.27715) | vendored from [tilde-research/aurora-release](https://github.com/tilde-research/aurora-release) - leverage-aware spectral optimizer (Muon-style hybrid: 2D matrices via Aurora, rest via AdamW). On the best config stack with `lr=0.03, weight_decay=0.025`: loss: `3.1965` -> `3.1603` - new best (run F99) - peak VRAM: `59643 MiB`, step_time: `721ms`
+Aurora - [paper](https://arxiv.org/abs/2606.27715) | code from [tilde-research/aurora-release](https://github.com/tilde-research/aurora-release) - matrix weights use Aurora, other weights use AdamW - `lr=0.03, weight_decay=0.025` - loss: `3.1965` -> `3.1603` - peak VRAM: `59643 MiB`, step_time: `721ms`
 
 BiClip - [link](https://arxiv.org/pdf/2502.04164) - (not working well) loss: `7.2292`, peak VRAM: `39751 MiB`, step_time: `510ms`
 
@@ -314,7 +312,9 @@ Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
 
 ## Autoresearch results
 
-The current autoresearch ledger is `ar/results.tsv`; the active best config is `ar/best_config.json`. The full-run ledger is `ar/full_results.tsv`. The current best result is E7b, rotary + RoVE on the Aurora + Engram ×20 stack (`3.1106`), superseding F99 Aurora (`3.1603`) and F94 GRAPE-A (`3.1897`).
+The automatic experiment logs are in `ar/`. `ar/results.tsv` has the short runs, `ar/full_results.tsv` has the full runs, and `ar/best_config.json` has the best config.
+
+The best loss so far is `3.1106`: RoPE + RoVE, the Aurora optimizer and a large Engram table.
 
 ## Best Model So Far
 
