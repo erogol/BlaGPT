@@ -124,6 +124,9 @@ class Primer_MLP(nn.Module):
         x = F.linear(
             x, (self.c_fc * self.c_fc_scale.unsqueeze(0)).type_as(x)
         )  # fuse weight & weight_scale mults
+        mod = getattr(self, "_lattice_mod", None)
+        if mod is not None:  # F107: Lattice shift of the pre-activation
+            x = mod.mlp_shift(x, self._lattice_holder[self._lattice_key])
         x = F.relu(
             x
         ).square()  # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977

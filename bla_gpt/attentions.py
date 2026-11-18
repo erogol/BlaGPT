@@ -368,11 +368,21 @@ class Attention(nn.Module):
         return self._project_output(y, B, T_q, C)
 
     def _project_query(self, x, B, T):
-        return self.q_proj(x).view(B, T, self.n_head, self.head_dim)
+        q = self.q_proj(x).view(B, T, self.n_head, self.head_dim)
+        return self._lattice_film("q", q)
+
+    def _lattice_film(self, which, x):
+        # F107 Lattice FiLM on the projected q/k/v, before norm/RoPE.
+        mod = getattr(self, "_lattice_mod", None)
+        if mod is None:
+            return x
+        return mod.film(which, x, self._lattice_holder[self._lattice_key])
 
     def _project_kv(self, x, B, T):
         kv = self.kv_proj(x).view(B, T, 2, self.n_kv_head, self.head_dim)
         k, v = kv.unbind(dim=2)
+        k = self._lattice_film("k", k)
+        v = self._lattice_film("v", v)
         v = self._apply_embed_value_residual(v, B, T)
         v = self._apply_value_residual(v)
         return k, v

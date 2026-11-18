@@ -156,6 +156,11 @@ class GPTConfig(Coqpit):
     muddformer_mix: bool = False  # MUDDformer residual mix (arXiv:2502.12147): blends a stored reference-layer hidden state into later layers via a per-layer learned scalar
     muddformer_ref_layer: int = 0  # which layer's post-block hidden state to store and mix into later layers
     use_oasis_depth_softmax1: bool = False  # OASIS depth-Softmax1 null route for AttnResidual (arXiv:2605.17887), default off
+    # F107 Lattice of Latents (arXiv:2611.21608): per-layer horizontal latent with affine scan, FiLM on q/k/v, MLP shift. Default off.
+    lattice_enabled: bool = False
+    lattice_layers: list[int] = field(default_factory=list)  # empty = paper E4/L16/D4 ratio: skip round(n_layer/6) layers at each end
+    lattice_dr: int = 256  # horizontal latent width d_r
+    lattice_inj: bool = True  # input injection (App. A.2.2): normed token embedding into Delta and c
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -580,6 +585,11 @@ class HyperConnection(nn.Module):
         B, A_m, A_r = self._dynamic_matrices(streams)
 
         branch_in = torch.einsum("btsc,bts->btc", streams, A_m) if self.dynamic else torch.einsum("btsc,s->btc", streams, A_m)
+        pre = getattr(self, "_lattice_pre", None)
+        if pre is not None:
+            # F107 Sec. 3.3: one latent per layer, read from the mixed input.
+            mod, holder, key = pre
+            holder[key] = mod.update(branch_in, holder.get("e"))
         branch_out = branch_fn(ln_pre(branch_in), **kwargs)
 
         if ln_post is not None:
@@ -832,8 +842,16 @@ class GPT(nn.Module):
         if getattr(config, "muddformer_mix", False):
             self.muddformer_mix_coef = nn.Parameter(torch.zeros(config.n_layer))
 
+        # F107 Lattice of Latents: one LatticeLayer per Lattice layer.
+        self.lattice = None
+        if getattr(config, "lattice_enabled", False):
+            self._init_lattice()
+
         # init all weights
         self.apply(self._init_weights)
+        if self.lattice is not None:
+            for mod in self.lattice.values():
+                mod.reset_lattice_parameters()
         self._init_attn_res()
         self._init_value_residual()
         self._init_embed_value_residual()
@@ -996,6 +1014,42 @@ class GPT(nn.Module):
             block.attn.ev_res_holder = self._ev_res_holder
             block.attn.ev_res_lambda = nn.Parameter(torch.zeros(1))
 
+    def lattice_layer_ids(self):
+        cfg = self.config
+        if cfg.lattice_layers:
+            return sorted(int(i) for i in cfg.lattice_layers)
+        skip = max(1, round(cfg.n_layer / 6))  # paper E4/L16/D4 ratio
+        return list(range(skip, cfg.n_layer - skip))
+
+    def _init_lattice(self):
+        from lattice import LatticeLayer, attach_lattice
+        cfg = self.config
+        if cfg.enable_weight_sharing:
+            raise ValueError("lattice_enabled does not support weight sharing")
+        self._lattice_holder = {}
+        mods = {}
+        for i in self.lattice_layer_ids():
+            block = self.transformer.h[i]
+            attn, mlp = block.attn, block.mlp
+            if not isinstance(attn, Attention) or not isinstance(mlp, Primer_MLP):
+                raise ValueError("lattice needs Attention-based attn and Primer_MLP")
+            q_dim = attn.q_proj.out_features
+            kv_dim = attn.kv_proj.out_features // 2
+            mod = LatticeLayer(
+                cfg.n_embd, cfg.lattice_dr, q_dim, kv_dim, mlp.c_fc.size(0),
+                inj=cfg.lattice_inj,
+            )
+            mods[str(i)] = mod
+            attach_lattice(attn, mlp, mod, self._lattice_holder, str(i))
+            if cfg.use_hyper_connections:
+                # Sec. 3.3: the update reads the mixed (A_m) attention input.
+                object.__setattr__(block.attn_hyper, "_lattice_pre", (mod, self._lattice_holder, str(i)))
+        self.lattice = nn.ModuleDict(mods)
+
+    def _lattice_update(self, key, x):
+        mod = self.lattice[key]
+        self._lattice_holder[key] = mod.update(x, self._lattice_holder.get("e"))
+
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
@@ -1020,6 +1074,10 @@ class GPT(nn.Module):
         if self.engram is not None and self.engram_variant == "ngram_lambda":
             x0 = x  # Initial token embedding (after dropout)
             x0_ngram = self.engram.get_ngram_embedding(idx)  # N-gram hash embedding
+
+        if self.lattice is not None:
+            # F107 inj: parameter-free RMS norm of the token embedding.
+            self._lattice_holder["e"] = F.rms_norm(x, (x.size(-1),)) if self.config.lattice_inj else None
 
         if self.config.use_hyper_connections:
             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
@@ -1064,6 +1122,13 @@ class GPT(nn.Module):
                     x = self.engram.mix_at_layer(x, x0, x0_ngram, layer_idx)
                 else:  # "simple" or "minimal"
                     x = x + self.engram(x, idx)
+            if (
+                self.lattice is not None
+                and not self.config.use_hyper_connections
+                and str(layer_idx) in self.lattice
+            ):
+                # F107: horizontal update reads the block input h^{l-1}.
+                self._lattice_update(str(layer_idx), x)
             if _attn_res:
                 _h_in = x
                 x = block(x, token_ids=idx)
