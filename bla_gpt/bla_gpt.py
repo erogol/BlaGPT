@@ -161,6 +161,11 @@ class GPTConfig(Coqpit):
     lattice_layers: list[int] = field(default_factory=list)  # empty = paper E4/L16/D4 ratio: skip round(n_layer/6) layers at each end
     lattice_dr: int = 256  # horizontal latent width d_r
     lattice_inj: bool = True  # input injection (App. A.2.2): normed token embedding into Delta and c
+    # F108 Multi-Branch Transformer (arXiv:2611.19800): prelude -> mbt_branches parallel branches
+    # (same input H, own weights) -> concat fusion -> coda. 0 = off (bit-identical base model).
+    mbt_branches: int = 0  # 0 (off) or 2
+    mbt_prelude: int = 3  # shared prelude blocks h[0..mbt_prelude-1]
+    mbt_branch_depth: int = 2  # blocks per branch; coda = n_layer - mbt_prelude - mbt_branches * mbt_branch_depth
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -847,6 +852,32 @@ class GPT(nn.Module):
         if getattr(config, "lattice_enabled", False):
             self._init_lattice()
 
+        # F108 Multi-Branch Transformer (arXiv:2611.19800 Eq. 4): per-branch
+        # RMSNorm, concat, bias-free projection. Not named c_proj, so
+        # zero_init_proj_layers does not zero it.
+        _mbt_k = getattr(config, "mbt_branches", 0)
+        assert _mbt_k in (0, 2), f"mbt_branches must be 0 or 2, got {_mbt_k}"
+        if _mbt_k > 0:
+            bad = [n for n, on in (
+                ("use_hyper_connections", config.use_hyper_connections),
+                ("lattice_enabled", getattr(config, "lattice_enabled", False)),
+                ("muddformer_mix", getattr(config, "muddformer_mix", False)),
+                ("attn_res_block_size > 0", getattr(config, "attn_res_block_size", 0) > 0),
+                ("enable_weight_sharing", config.enable_weight_sharing),
+            ) if on]
+            assert not bad, f"mbt_branches > 0 is incompatible with: {bad}"
+            _coda = config.n_layer - config.mbt_prelude - _mbt_k * config.mbt_branch_depth
+            assert config.mbt_prelude >= 0 and config.mbt_branch_depth > 0 and _coda >= 0, (
+                "mbt_prelude + mbt_branches * mbt_branch_depth must fit in n_layer"
+            )
+            # U-net pairs that touch branch blocks are dropped; the kept coda
+            # pairs must read prelude outputs only (F108: 2->7, 1->8, 0->9).
+            assert not getattr(config, "use_unet_skips", False) or (
+                _coda <= config.mbt_prelude <= config.n_layer // 2
+            ), "mbt with use_unet_skips needs coda <= mbt_prelude <= n_layer // 2"
+            self.mbt_fuse_norms = nn.ModuleList(RMSNorm(config.n_embd, eps=1e-5) for _ in range(_mbt_k))
+            self.mbt_fuse_proj = nn.Linear(_mbt_k * config.n_embd, config.n_embd, bias=False)
+
         # init all weights
         self.apply(self._init_weights)
         if self.lattice is not None:
@@ -869,6 +900,9 @@ class GPT(nn.Module):
                     torch.nn.init.normal_(
                         p, mean=0.0, std=(0.02 / math.sqrt(2 * config.n_layer)) * hyper_scale
                     )
+        if _mbt_k > 0:
+            # Paper App. A.8: output-layer init 0.02/sqrt(2L), after the global init.
+            torch.nn.init.normal_(self.mbt_fuse_proj.weight, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
 
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
@@ -1050,6 +1084,26 @@ class GPT(nn.Module):
         mod = self.lattice[key]
         self._lattice_holder[key] = mod.update(x, self._lattice_holder.get("e"))
 
+    def _mbt_forward(self, h, idx, x0=None, x0_ngram=None):
+        # F108 MBT (arXiv:2611.19800 Sec. 2.1 Eq. 4; ref code mbt/decoder.py:91-109):
+        # every branch starts from the same H and runs its own blocks in order
+        # (physical indices kept). F = Linear(concat(RMSNorm_k(Z_k))) replaces
+        # the stream: no branch residual. No AttnRes mix or U-net skip inside.
+        cfg = self.config
+        lo, d = cfg.mbt_prelude, cfg.mbt_branch_depth
+        outs = []
+        for b in range(cfg.mbt_branches):
+            z = h
+            for layer_idx in range(lo + b * d, lo + (b + 1) * d):
+                if self.engram is not None:
+                    if self.engram_variant == "ngram_lambda":
+                        z = self.engram.mix_at_layer(z, x0, x0_ngram, layer_idx)
+                    else:  # "simple" or "minimal"
+                        z = z + self.engram(z, idx)
+                z = self.transformer.h[layer_idx](z, token_ids=idx)
+            outs.append(self.mbt_fuse_norms[b](z))
+        return self.mbt_fuse_proj(torch.cat(outs, dim=-1))
+
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
@@ -1102,7 +1156,20 @@ class GPT(nn.Module):
         _n_layers = len(self.transformer.h)
         _muddformer = getattr(self.config, "muddformer_mix", False)
         _muddformer_ref = None
+        # F108 MBT: blocks [_mbt_lo, _mbt_hi) form the branch super-block.
+        _mbt_k = getattr(self.config, "mbt_branches", 0)
+        _mbt_lo = self.config.mbt_prelude if _mbt_k > 0 else -1
+        _mbt_hi = (_mbt_lo + _mbt_k * self.config.mbt_branch_depth) if _mbt_k > 0 else -1
         for layer_idx, block in enumerate(self.transformer.h):
+            if _mbt_lo <= layer_idx < _mbt_hi:
+                if layer_idx == _mbt_lo:
+                    if _attn_res:
+                        # H = AttnRes mix row _mbt_lo over [emb, d0, ..., d_{lo-1}]
+                        x = self._attn_res_mix(_ar_vs, self.attn_res_w[layer_idx])
+                    x = self._mbt_forward(x, idx, x0, x0_ngram)
+                    if _attn_res:
+                        _ar_vs.append(x)  # the source is F itself, not F - H
+                continue
             if _attn_res:
                 _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
                 _w = self.attn_res_w[layer_idx]
