@@ -1,0 +1,6 @@
+started_utc=2026-11-19T15:47:15Z
+git_commit=543fde345c37d8c292379fed55d2ea5a8ff28508
+run_name=ar_full_F108
+config=ar/full_runs/F108/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_F108_0
