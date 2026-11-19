@@ -109,7 +109,7 @@ Multi-Head Attention Residuals - [paper](https://arxiv.org/abs/2607.27230) | [ex
 
 RoPE instead of GRAPE-A - [paper](https://arxiv.org/abs/2104.09864) - best_model_loss: `3.1265` -> new_best_model_loss: `3.1134` - peak memory: `85160 MiB` - step_avg: `993.42ms` - about 7% faster; no loss gain on a second seed
 
-👑 RoVE - [paper](https://arxiv.org/abs/2606.11275) | [explanation](./techniques/rove.md) - best_model_loss: `3.1134` -> new_best_model_loss: `3.1106` - peak memory: `85258 MiB` - step_avg: `1018.28ms` - applies the rotary rotation to the values too; no new parameters; small gain on two seeds
+RoVE - [paper](https://arxiv.org/abs/2606.11275) | [explanation](./techniques/rove.md) - best_model_loss: `3.1134` -> new_best_model_loss: `3.1106` - peak memory: `85258 MiB` - step_avg: `1018.28ms` - applies the rotary rotation to the values too; no new parameters; small gain on two seeds
 
 LM-head SGD-M - [paper](https://arxiv.org/abs/2610.38277) - best_model_loss: `3.1106` -> loss: `3.1782` - peak memory: `85774 MiB` - step_avg: `1010.87ms` - trains the output layer with SGD + momentum; output logits stay smaller, but loss is 0.07-0.09 worse
 
@@ -124,6 +124,8 @@ NorMuon + cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.0
 Latent Lattice - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> loss: `3.1139` - peak memory: `92059 MiB` - step_avg: `1194.26ms` - one recurrent latent (width 256) per middle layer 3-7 that modulates q/k/v and the MLP; +20M params, about 15% slower per step; much better before step 1250, slightly worse after; at equal wall-clock time worse (3.22 vs 3.11 when the baseline ends)
 
 Multi-Branch Transformer - [paper](https://arxiv.org/abs/2611.19800) - best_model_loss: `3.1106` -> loss: `3.1324` - peak memory: `82511 MiB` - step_avg: `999.70ms` - blocks 3-4 and 5-6 run as two parallel branches on the same input; one RMSNorm per branch, concat and a linear layer join them (layout 3/(2+2)/3, sequential depth 8); +1.18M params, same speed; much better before step 1250 (-0.08 at step 1000), 0.02-0.03 worse after; MBT inside E7b: AttnRes and the U-net 2->7 skip still go around the branches
+
+👑 Latent Lattice F107b - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> new_best_model_loss: `3.1067` - peak memory: `94160 MiB` - step_avg: `1149.82ms` - fixes the first try above: FiLM on q/k after the QK norm, Lattice params in AdamW (lr 1e-3, wd 0.1), vstream, Lattice layers 2-7; second seed: `3.1035` vs `3.1240`; +25M params (984.14M), about 15% slower per step, so at equal train time still worse than E7b (about 3.185 vs 3.1113)
 
 
 ## Other Models
@@ -150,10 +152,6 @@ Avey - [link](https://arxiv.org/pdf/2506.11305v1) - loss: `3.323`, peak memory: 
 LFM2 - [link](https://huggingface.co/LiquidAI/LFM2-1.2B) - TBD
 
 Kimi Delta Attention (1:3 interleaved Full Attention) - [link](https://arxiv.org/abs/2510.26692) - best_model_loss: `3.2411` -> loss: `3.2532`, peak_memory:`47391`,  step_time: `568.1ms`
-
-Latent Lattice (on the E7b stack, `lattice_enabled=True`) - [link](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> loss: `3.1139`, peak_memory: `92059 MiB`, step_time: `1194.26ms`, params: `979.02M` (+2.1%) - much better early (-0.22 at step 1125), slightly worse after the switch to full sequence length
-
-Latent Lattice F107b (paper fixes: FiLM q/k after QK norm, Lattice params in AdamW lr 1e-3 wd 0.1, vstream, layers 2-7) - [link](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> loss: `3.1067` (seed 2: `3.1035` vs `3.1240`), peak_memory: `94160 MiB`, step_time: `1149.82ms`, params: `984.14M` - keep on step-matched loss; slower per step, so worse than E7b at equal train time
 
 
 ## Byte-Level Models
@@ -322,7 +320,7 @@ Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
 
 The automatic experiment logs are in `ar/`. `ar/results.tsv` has the short runs, `ar/full_results.tsv` has the full runs, and `ar/best_config.json` has the best config.
 
-The best loss so far is `3.1106`: RoPE + RoVE, the Aurora optimizer and a large Engram table.
+The best loss so far is `3.1067`: Latent Lattice (F107b) on top of RoPE + RoVE, the Aurora optimizer and a large Engram table.
 
 ## Best Model So Far
 

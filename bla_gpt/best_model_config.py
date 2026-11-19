@@ -117,6 +117,17 @@ class BestConfig(GPTConfig):
     hyper_num_streams: int = 4
     hyper_tanh: bool = True
 
+    # Latent Lattice F107b (arXiv:2611.21608)
+    lattice_enabled: bool = True
+    lattice_layers: list[int] = field(default_factory=lambda: [2, 3, 4, 5, 6, 7])
+    lattice_dr: int = 256
+    lattice_inj: bool = True
+    lattice_film_after_qknorm: bool = True
+    lattice_adamw: bool = True
+    lattice_lr: float = 1e-3
+    lattice_wd: float = 0.1
+    lattice_vstream: bool = True
+
     # KDA (off but configured)
     use_kda_interleaving: bool = False
     kda_chunk_size: int = 64

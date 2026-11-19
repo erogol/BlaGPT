@@ -95,5 +95,21 @@
   "grape_omega_init": 1.0,
   "grape_v_l2_norm": true,
   "seed": 1337,
-  "rove": true
+  "rove": true,
+  "lattice_enabled": true,
+  "lattice_layers": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "lattice_dr": 256,
+  "lattice_inj": true,
+  "lattice_film_after_qknorm": true,
+  "lattice_adamw": true,
+  "lattice_lr": 0.001,
+  "lattice_wd": 0.1,
+  "lattice_vstream": true
 }
