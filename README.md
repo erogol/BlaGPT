@@ -153,6 +153,8 @@ Kimi Delta Attention (1:3 interleaved Full Attention) - [link](https://arxiv.org
 
 Latent Lattice (on the E7b stack, `lattice_enabled=True`) - [link](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> loss: `3.1139`, peak_memory: `92059 MiB`, step_time: `1194.26ms`, params: `979.02M` (+2.1%) - much better early (-0.22 at step 1125), slightly worse after the switch to full sequence length
 
+Latent Lattice F107b (paper fixes: FiLM q/k after QK norm, Lattice params in AdamW lr 1e-3 wd 0.1, vstream, layers 2-7) - [link](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> loss: `3.1067` (seed 2: `3.1035` vs `3.1240`), peak_memory: `94160 MiB`, step_time: `1149.82ms`, params: `984.14M` - keep on step-matched loss; slower per step, so worse than E7b at equal train time
+
 
 ## Byte-Level Models
 Hourglass Transformer (modified) - [link](https://arxiv.org/abs/2110.13711) - `val_loss:1.0048 train_time:2671049ms step_avg:524.76ms`

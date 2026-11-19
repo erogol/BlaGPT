@@ -51,10 +51,21 @@ def lattice_scan_ref(g, b, r0):
 class LatticeLayer(nn.Module):
     """Horizontal latent update, readout and modulation heads for one layer."""
 
-    def __init__(self, n_embd, d_r, q_dim, kv_dim, mlp_dim, inj=True):
+    def __init__(self, n_embd, d_r, q_dim, kv_dim, mlp_dim, inj=True,
+                 film_after_qknorm=False, vstream=False):
         super().__init__()
         self.d_r = d_r
         self.inj = inj
+        # F107b fix 1: FiLM q/k after the per-head QK RMSNorm, before RoPE.
+        self.film_after_qknorm = film_after_qknorm
+        # F107b fix 3: depth-wise readout stream (Sec. 3.2.2), hidden width d_r.
+        self.vstream = vstream
+        if vstream:
+            self.vs_norm_r_w = nn.Parameter(torch.ones(d_r))
+            self.vs_norm_s_w = nn.Parameter(torch.ones(d_r))
+            self.vs_norm_out_w = nn.Parameter(torch.ones(d_r))
+            self.vs_down = nn.Linear(2 * d_r, d_r, bias=False)
+            self.vs_up = nn.Linear(d_r, d_r, bias=False)
         self.norm_in_w = nn.Parameter(torch.ones(n_embd))
         self.norm_out_w = nn.Parameter(torch.ones(d_r))
         self.w_delta = nn.Linear(n_embd, d_r, bias=True)
@@ -87,6 +98,11 @@ class LatticeLayer(nn.Module):
         zero = [self.film_q, self.film_k, self.film_v, self.mlp_beta]
         if self.inj:
             zero += [self.w_e_delta, self.w_e_c]
+        if self.vstream:
+            nn.init.normal_(self.vs_down.weight, std=0.02)
+            for w in (self.vs_norm_r_w, self.vs_norm_s_w, self.vs_norm_out_w):
+                w.fill_(1.0)
+            zero.append(self.vs_up)
         for lin in zero:
             nn.init.zeros_(lin.weight)
         self.a_log._no_weight_decay = True
@@ -109,6 +125,30 @@ class LatticeLayer(nn.Module):
             c = F.silu(pre_c.float())
             r = lattice_scan(g, (1.0 - g) * c, self.r0)
             return _rms(r, self.norm_out_w.float())
+
+    def step(self, holder, key, x):
+        """Run the update for this layer and store its readout in holder[key].
+
+        With vstream, holder["s"] carries the depth-wise state s^{l-1}
+        (None = zero seed at the first Lattice layer) and the stored readout
+        is the enriched r_tilde = r_hat + Norm(s^l). The scan state stays raw r.
+        """
+        r_hat = self.update(x, holder.get("e"))
+        if self.vstream:
+            r_hat, holder["s"] = self.vstream_step(r_hat, holder.get("s"))
+        holder[key] = r_hat
+
+    def vstream_step(self, r_hat, s_prev):
+        """s^l = s^{l-1} + W_up SiLU(W_down [Norm(r_hat), Norm(s^{l-1})]), fp32."""
+        with torch.autocast(device_type=r_hat.device.type, enabled=False):
+            r_hat = r_hat.float()
+            if s_prev is None:
+                s_prev = torch.zeros_like(r_hat)
+            z = torch.cat([_rms(r_hat, self.vs_norm_r_w.float()),
+                           _rms(s_prev, self.vs_norm_s_w.float())], dim=-1)
+            h = F.silu(F.linear(z, self.vs_down.weight.float()))
+            s = s_prev + F.linear(h, self.vs_up.weight.float())
+            return r_hat + _rms(s, self.vs_norm_out_w.float()), s
 
     def film(self, which, x, r_hat):
         """(W x) * (1 + tanh(gamma(r_hat))) + beta(r_hat), in fp32.

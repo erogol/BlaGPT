@@ -371,10 +371,14 @@ class Attention(nn.Module):
         q = self.q_proj(x).view(B, T, self.n_head, self.head_dim)
         return self._lattice_film("q", q)
 
-    def _lattice_film(self, which, x):
+    def _lattice_film(self, which, x, post=False):
         # F107 Lattice FiLM on the projected q/k/v, before norm/RoPE.
+        # F107b fix 1: with film_after_qknorm, q/k FiLM runs after the QK
+        # norm (post=True call in _apply_norm); v FiLM never moves.
         mod = getattr(self, "_lattice_mod", None)
         if mod is None:
+            return x
+        if which != "v" and mod.film_after_qknorm != post:
             return x
         return mod.film(which, x, self._lattice_holder[self._lattice_key])
 
@@ -422,6 +426,8 @@ class Attention(nn.Module):
     def _apply_norm(self, q, k):
         q = self.q_norm(q)
         k = self.k_norm(k)
+        q = self._lattice_film("q", q, post=True)
+        k = self._lattice_film("k", k, post=True)
         return q, k
 
     def _apply_v_norm(self, v):
