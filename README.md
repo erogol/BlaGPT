@@ -121,6 +121,8 @@ Cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.12402) - be
 
 NorMuon + cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.05491) - best_model_loss: `3.1106` -> loss: `3.1159` - peak memory: `85263 MiB` - step_avg: `1035.27ms`
 
+Latent Lattice - [paper](https://arxiv.org/abs/2611.21608) - best_model_loss: `3.1106` -> loss: `3.1139` - peak memory: `92059 MiB` - step_avg: `1194.26ms` - one recurrent latent (width 256) per middle layer 3-7 that modulates q/k/v and the MLP; +20M params, about 15% slower per step; much better before step 1250, slightly worse after; at equal wall-clock time worse (3.22 vs 3.11 when the baseline ends)
+
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
