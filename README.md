@@ -123,6 +123,8 @@ NorMuon + cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.0
 
 Latent Lattice - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> loss: `3.1139` - peak memory: `92059 MiB` - step_avg: `1194.26ms` - one recurrent latent (width 256) per middle layer 3-7 that modulates q/k/v and the MLP; +20M params, about 15% slower per step; much better before step 1250, slightly worse after; at equal wall-clock time worse (3.22 vs 3.11 when the baseline ends)
 
+Multi-Branch Transformer - [paper](https://arxiv.org/abs/2611.19800) - best_model_loss: `3.1106` -> loss: `3.1324` - peak memory: `82511 MiB` - step_avg: `999.70ms` - blocks 3-4 and 5-6 run as two parallel branches on the same input; one RMSNorm per branch, concat and a linear layer join them (layout 3/(2+2)/3, sequential depth 8); +1.18M params, same speed; much better before step 1250 (-0.08 at step 1000), 0.02-0.03 worse after; MBT inside E7b: AttnRes and the U-net 2->7 skip still go around the branches
+
 
 ## Other Models
 MegaByte - [link](https://arxiv.org/abs/2305.07185) - loss: `3.810`
