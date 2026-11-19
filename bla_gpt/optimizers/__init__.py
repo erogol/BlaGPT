@@ -4,6 +4,27 @@ from typing import List
 import torch
 
 
+def _lattice_adamw_groups(model: torch.nn.Module) -> list:
+    """F107b fix 2: AdamW groups for all Lattice params, or [] when off.
+
+    Decay (lattice_wd) on weights, r_0 and the Lattice norm gains; no decay
+    on biases (b_Delta = dt_bias, b_r) and a_log (paper App. A.4.1).
+    """
+    cfg = getattr(model, "config", None)
+    if not getattr(cfg, "lattice_adamw", False) or getattr(model, "lattice", None) is None:
+        return []
+    decay, nodecay = [], []
+    for name, p in model.lattice.named_parameters():
+        if name.endswith(".bias") or name.endswith("a_log") or getattr(p, "_no_weight_decay", False):
+            nodecay.append(p)
+        else:
+            decay.append(p)
+    return [
+        dict(params=decay, lr=cfg.lattice_lr, adamw_wd=cfg.lattice_wd, lattice=True),
+        dict(params=nodecay, lr=cfg.lattice_lr, adamw_wd=0.0, lattice=True),
+    ]
+
+
 def describe_update_paths(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -225,7 +246,14 @@ def get_optimizer(
                     f"shape={tuple(head_tensor.shape)} update_rule={rule}"
                 )
                 break
-        return optimizer(
+        # F107b fix 2: Lattice params leave Aurora and the shared AdamW
+        # backup and get their own AdamW groups (paper App. A.4.1).
+        lattice_groups = _lattice_adamw_groups(model)
+        if lattice_groups:
+            ids = {id(p) for g in lattice_groups for p in g["params"]}
+            aurora_params = [p for p in aurora_params if id(p) not in ids]
+            adamw_params = [p for p in adamw_params if id(p) not in ids]
+        opt = optimizer(
             lr=lr,
             aurora_params=aurora_params,
             adamw_params=adamw_params,
@@ -233,6 +261,11 @@ def get_optimizer(
             sgd_m_lr=lm_head_sgd_lr,
             **optimizer_params
         )
+        for g in lattice_groups:
+            opt.add_param_group(g)  # missing keys come from Aurora defaults
+            for p in g["params"]:
+                opt.state[p]["use_aurora"] = False
+        return opt
     elif optimizer_name.lower() == "biclip":
         from optimizers.bliclip import BiClipSGD_Full
         return BiClipSGD_Full(parameters, lr=lr, **optimizer_params)

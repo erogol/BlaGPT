@@ -161,6 +161,12 @@ class GPTConfig(Coqpit):
     lattice_layers: list[int] = field(default_factory=list)  # empty = paper E4/L16/D4 ratio: skip round(n_layer/6) layers at each end
     lattice_dr: int = 256  # horizontal latent width d_r
     lattice_inj: bool = True  # input injection (App. A.2.2): normed token embedding into Delta and c
+    # F107b fixes, each default off (F107 behaviour unchanged).
+    lattice_film_after_qknorm: bool = False  # fix 1: FiLM q/k after the per-head QK RMSNorm, before RoPE
+    lattice_adamw: bool = False  # fix 2: all Lattice params in separate AdamW groups (not Aurora)
+    lattice_lr: float = 1e-3  # fix 2: peak lr of the Lattice AdamW groups (same schedule as the rest)
+    lattice_wd: float = 0.1  # fix 2: decay on Lattice weights, r_0, norm gains; none on biases, a_log
+    lattice_vstream: bool = False  # fix 3: depth-wise readout stream (Sec. 3.2.2)
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -589,7 +595,7 @@ class HyperConnection(nn.Module):
         if pre is not None:
             # F107 Sec. 3.3: one latent per layer, read from the mixed input.
             mod, holder, key = pre
-            holder[key] = mod.update(branch_in, holder.get("e"))
+            mod.step(holder, key, branch_in)
         branch_out = branch_fn(ln_pre(branch_in), **kwargs)
 
         if ln_post is not None:
@@ -1035,9 +1041,13 @@ class GPT(nn.Module):
                 raise ValueError("lattice needs Attention-based attn and Primer_MLP")
             q_dim = attn.q_proj.out_features
             kv_dim = attn.kv_proj.out_features // 2
+            if cfg.lattice_film_after_qknorm and not hasattr(attn, "q_norm"):
+                raise ValueError("lattice_film_after_qknorm needs rmsnorm_before_qk")
             mod = LatticeLayer(
                 cfg.n_embd, cfg.lattice_dr, q_dim, kv_dim, mlp.c_fc.size(0),
                 inj=cfg.lattice_inj,
+                film_after_qknorm=cfg.lattice_film_after_qknorm,
+                vstream=cfg.lattice_vstream,
             )
             mods[str(i)] = mod
             attach_lattice(attn, mlp, mod, self._lattice_holder, str(i))
@@ -1047,8 +1057,7 @@ class GPT(nn.Module):
         self.lattice = nn.ModuleDict(mods)
 
     def _lattice_update(self, key, x):
-        mod = self.lattice[key]
-        self._lattice_holder[key] = mod.update(x, self._lattice_holder.get("e"))
+        self.lattice[key].step(self._lattice_holder, key, x)
 
     def forward(self, idx, targets=None):
         device = idx.device
@@ -1078,6 +1087,7 @@ class GPT(nn.Module):
         if self.lattice is not None:
             # F107 inj: parameter-free RMS norm of the token embedding.
             self._lattice_holder["e"] = F.rms_norm(x, (x.size(-1),)) if self.config.lattice_inj else None
+            self._lattice_holder["s"] = None  # F107b vstream: zero seed
 
         if self.config.use_hyper_connections:
             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
