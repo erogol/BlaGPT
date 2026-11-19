@@ -121,7 +121,7 @@ Cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.12402) - be
 
 NorMuon + cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.05491) - best_model_loss: `3.1106` -> loss: `3.1159` - peak memory: `85263 MiB` - step_avg: `1035.27ms`
 
-Latent Lattice - [paper](https://arxiv.org/abs/2611.21608) - best_model_loss: `3.1106` -> loss: `3.1139` - peak memory: `92059 MiB` - step_avg: `1194.26ms` - one recurrent latent (width 256) per middle layer 3-7 that modulates q/k/v and the MLP; +20M params, about 15% slower per step; much better before step 1250, slightly worse after; at equal wall-clock time worse (3.22 vs 3.11 when the baseline ends)
+Latent Lattice - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> loss: `3.1139` - peak memory: `92059 MiB` - step_avg: `1194.26ms` - one recurrent latent (width 256) per middle layer 3-7 that modulates q/k/v and the MLP; +20M params, about 15% slower per step; much better before step 1250, slightly worse after; at equal wall-clock time worse (3.22 vs 3.11 when the baseline ends)
 
 
 ## Other Models
@@ -148,6 +148,8 @@ Avey - [link](https://arxiv.org/pdf/2506.11305v1) - loss: `3.323`, peak memory: 
 LFM2 - [link](https://huggingface.co/LiquidAI/LFM2-1.2B) - TBD
 
 Kimi Delta Attention (1:3 interleaved Full Attention) - [link](https://arxiv.org/abs/2510.26692) - best_model_loss: `3.2411` -> loss: `3.2532`, peak_memory:`47391`,  step_time: `568.1ms`
+
+Latent Lattice (on the E7b stack, `lattice_enabled=True`) - [link](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> loss: `3.1139`, peak_memory: `92059 MiB`, step_time: `1194.26ms`, params: `979.02M` (+2.1%) - much better early (-0.22 at step 1125), slightly worse after the switch to full sequence length
 
 
 ## Byte-Level Models

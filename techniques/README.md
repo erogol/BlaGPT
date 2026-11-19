@@ -7,6 +7,7 @@ This directory tries to explain various techniques implemented in this repositor
 - [**Composable Value Residual**](./value_residual.md) - ResFormer-style value residuals inside the normal BlaGPT attention path
 - [**U-net Long Skips**](./unet_skips.md) - Mirrored early-to-late layer skip connections with learned scalar weights
 - [**Multi-Head Attention Residuals**](./mhar.md) - Per-subspace depth routing for Attention Residuals (H heads, zero new parameters)
+- [**Latent Lattice**](./latent_lattice.md) - Per-layer recurrent latents along time that modulate q/k/v and the MLP
 
 ## Attention Mechanisms
 - [**Differential Attention v2**](./diff_attn_v2.md) - Subtracts two attention patterns to cancel noise and amplify relevant signals
