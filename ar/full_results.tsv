@@ -65,3 +65,4 @@ F104	f5b062d	E7b	3.2877	discard	samuon_lite_gamma10_on_E7b	bla_gpt/logs/ar_full_
 F105c	4a4faef	E7b	3.1134	discard	cautious_wd_on_E7b	bla_gpt/logs/ar_full_F105c_0/state_step005100.pt	Full 5100-step run; +0.0028 vs best E7b=3.1106; no confirmation because not lower
 F105n	c3902dd	E7b	3.1159	discard	normuon_rownorm_plus_cautious_wd_on_E7b	bla_gpt/logs/ar_full_F105n_0/state_step005100.pt	Full 5100-step run; +0.0053 vs best E7b=3.1106; no confirmation because not lower
 F107	f25f016	E7b	3.1139	discard	lattice_dr256_L3-7_inj_on_E7b	bla_gpt/logs/ar_full_F107_0/state_step005100.pt	Full 5100-step run; +0.0033 vs best E7b=3.1106; no confirmation because not lower
+F107b	edae234	E7b	3.1067	keep	lattice_dr256_L2-7_inj_vs_qkfilm_adamw_E7b	bla_gpt/logs/ar_full_F107b_0/state_step005100.pt	Full 5100-step run; -0.0039 vs best E7b=3.1106; clean keep, no confirmation required because improvement >=0.003
