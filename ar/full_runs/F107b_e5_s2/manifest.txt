@@ -1,0 +1,6 @@
+started_utc=2026-11-20T13:24:08Z
+git_commit=8fbea84a8235639d22224edd34c590f7d10f152d
+run_name=ar_full_F107b_e5_s2
+config=ar/full_runs/F107b_e5_s2/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_F107b_e5_s2_0
