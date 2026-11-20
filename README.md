@@ -97,37 +97,11 @@ GRAPE-A Positional Encoding - [paper](https://arxiv.org/abs/2512.07805) | [expla
 
 Aurora Optimizer - [paper](https://arxiv.org/abs/2606.27715) | [explanation](./techniques/aurora.md) - best_model_loss: `3.1897` -> new_best_model_loss: `3.1603` - peak memory: `59643 MiB` - step_avg: `721.25ms` - replaces Muon, `learning_rate=0.03`
 
-Weight EMA + LR floor - best_model_loss: `3.1603` -> new_best_model_loss: `3.1487` - peak memory: `61239 MiB` - step_avg: `731.65ms` - LR decays to 15% of peak, not to 0, and eval uses the average weights of the last 300 steps; later removed, no gain on the newer model
+Weight EMA + LR floor - best_model_loss: `3.1603` -> new_best_model_loss: `3.1487` - peak memory: `61239 MiB` - step_avg: `731.65ms` - LR decays to 15% of peak, not to 0, and eval uses the average weights of the last 300 steps; removed in F107b_e5
 
 Token normalization for Engram - [PR #375](https://github.com/KellerJordan/modded-nanogpt/pull/375) | [explanation](./techniques/engram.md) - best_model_loss: `3.1603` -> loss: `3.1564` - peak memory: `59643 MiB` - step_avg: `719.88ms` - tokens with the same first 2 bytes share one Engram entry; did not beat the EMA result above; off by default
 
-Engram vocab ×20 - [paper](https://github.com/deepseek-ai/Engram/blob/main/Engram_paper.pdf) | [explanation](./techniques/engram.md) - best_model_loss: `3.1603` -> new_best_model_loss: `3.1446` - step_avg: `1077.31ms` - 4x larger Engram table (`engram_vocab_mult` 5 -> 20); about 49% slower
-
-Fixed seed re-run - best_model_loss: `3.1446` -> new_best_model_loss: `3.1265` - peak memory: `85625 MiB` - step_avg: `1065.74ms` - same config with `seed=1337` and newer code; the cause of the gain is not clear; second seed: `3.1241`
-
-Multi-Head Attention Residuals - [paper](https://arxiv.org/abs/2607.27230) | [explanation](./techniques/mhar.md) - best_model_loss: `3.1265` -> loss: `3.1238` - peak memory: `93225 MiB` - step_avg: `1149.40ms` - about 8% slower; on top of RoPE + RoVE: `3.1106` -> `3.1113`, no gain
-
-RoPE instead of GRAPE-A - [paper](https://arxiv.org/abs/2104.09864) - best_model_loss: `3.1265` -> new_best_model_loss: `3.1134` - peak memory: `85160 MiB` - step_avg: `993.42ms` - about 7% faster; no loss gain on a second seed
-
-RoVE - [paper](https://arxiv.org/abs/2606.11275) | [explanation](./techniques/rove.md) - best_model_loss: `3.1134` -> new_best_model_loss: `3.1106` - peak memory: `85258 MiB` - step_avg: `1018.28ms` - applies the rotary rotation to the values too; no new parameters; small gain on two seeds
-
-LM-head SGD-M - [paper](https://arxiv.org/abs/2610.38277) - best_model_loss: `3.1106` -> loss: `3.1782` - peak memory: `85774 MiB` - step_avg: `1010.87ms` - trains the output layer with SGD + momentum; output logits stay smaller, but loss is 0.07-0.09 worse
-
-Embedding value residual - [Ripple-65B](https://huggingface.co/ricursiveAI/Ripple-65B-Preview) - best_model_loss: `3.1106` -> loss: `3.1136` - peak memory: `86422 MiB` - step_avg: `1014.35ms` - mixes the token embedding into the values of each layer
-
-SAMuon-lite in Aurora - [paper](https://arxiv.org/abs/2608.25990) - best_model_loss: `3.1106` -> loss: `3.2877` - peak memory: `85258 MiB` - step_avg: `1115.44ms` - most update directions get 10x larger steps, and the LR was not lowered for it; 11% slower
-
-Cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.12402) - best_model_loss: `3.1106` -> loss: `3.1134` - peak memory: `85258 MiB` - step_avg: `1020.17ms` - better in mid-training, but the gap closes at the end
-
-NorMuon + cautious weight decay in Aurora - [paper](https://arxiv.org/abs/2510.05491) - best_model_loss: `3.1106` -> loss: `3.1159` - peak memory: `85263 MiB` - step_avg: `1035.27ms`
-
-Latent Lattice - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> loss: `3.1139` - peak memory: `92059 MiB` - step_avg: `1194.26ms` - one recurrent latent (width 256) per middle layer 3-7 that modulates q/k/v and the MLP; +20M params, about 15% slower per step; much better before step 1250, slightly worse after; at equal wall-clock time worse (3.22 vs 3.11 when the baseline ends)
-
-Multi-Branch Transformer - [paper](https://arxiv.org/abs/2611.19800) - best_model_loss: `3.1106` -> loss: `3.1324` - peak memory: `82511 MiB` - step_avg: `999.70ms` - blocks 3-4 and 5-6 run as two parallel branches on the same input; one RMSNorm per branch, concat and a linear layer join them (layout 3/(2+2)/3, sequential depth 8); +1.18M params, same speed; much better before step 1250 (-0.08 at step 1000), 0.02-0.03 worse after; MBT inside E7b: AttnRes and the U-net 2->7 skip still go around the branches
-
-Latent Lattice F107b - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> new_best_model_loss: `3.1067` - peak memory: `94160 MiB` - step_avg: `1149.82ms` - fixes the first try above: FiLM on q/k after the QK norm, Lattice params in AdamW (lr 1e-3, wd 0.1), vstream, Lattice layers 2-7; second seed: `3.1035` vs `3.1240`; +25M params (984.14M), about 15% slower per step, so at equal train time still worse than E7b (about 3.185 vs 3.1113)
-
-👑 Latent Lattice F107e (F107b + speed flags) - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1067` -> new_best_model_loss: `3.1065` - peak memory: `81847 MiB` - step_avg: `1053.22ms` - F107b with `lattice_scan_impl="triton"` and `lattice_film_impl="bf16cat"` (pure speed options, same math): seq-switch gap 1.7 s (F107b 213.5 s), median full-length step 1019 ms (E7b 967 ms, F107b 1044 ms), 12.3 GB less peak memory than F107b; -0.0002 vs F107b is inside seed noise (~0.0024); at equal train time still worse than E7b: 3.1266 vs 3.1113 at 5106 s, and it needs 5271 s (+3.2%) to reach 3.1113; no seed-2 run because no time-matched win
+👑 RoPE + RoVE + Latent Lattice (F107b_e5) - [RoPE](https://arxiv.org/abs/2104.09864) | [RoVE](https://arxiv.org/abs/2606.11275) | [Latent Lattice](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1487` -> new_best_model_loss: `3.1153` - peak memory: `70569 MiB` - step_avg: `732.44ms` - 404.64M params; RoPE + RoVE replace GRAPE-A; one recurrent latent (width 256) on layers 2-7 modulates q/k/v and the MLP (FiLM after the QK norm, Lattice params in AdamW lr 1e-3, vstream); weight EMA and LR floor removed; second seed: `3.1230`
 
 
 ## Other Models
@@ -322,7 +296,7 @@ Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
 
 The automatic experiment logs are in `ar/`. `ar/results.tsv` has the short runs, `ar/full_results.tsv` has the full runs, and `ar/best_config.json` has the best config.
 
-The best loss so far is `3.1065`: Latent Lattice (F107e = F107b with the Triton scan and bf16cat FiLM speed options) on top of RoPE + RoVE, the Aurora optimizer and a large Engram table.
+The best loss so far is `3.1153`: Latent Lattice (F107b_e5) on top of RoPE + RoVE, the Aurora optimizer and the Engram table (`engram_vocab_mult=5`), 404.64M params.
 
 ## Best Model So Far
 

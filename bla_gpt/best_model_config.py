@@ -76,7 +76,7 @@ class BestConfig(GPTConfig):
     use_engram: bool = True
     engram_layers=[1,2,3,4,5,6]
     engram_ngram=3
-    engram_vocab_mult: int = 20
+    engram_vocab_mult: int = 5
     engram_share_embedding: bool = True
     engram_variant: str = "minimal"
 

@@ -15,7 +15,7 @@
   "engram_ngram": 3,
   "engram_share_embedding": true,
   "engram_variant": "minimal",
-  "engram_vocab_mult": 20,
+  "engram_vocab_mult": 5,
   "gated_norm_rank": 16,
   "hyper_dynamic": true,
   "hyper_num_streams": 4,
