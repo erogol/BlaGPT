@@ -125,7 +125,9 @@ Latent Lattice - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./tec
 
 Multi-Branch Transformer - [paper](https://arxiv.org/abs/2611.19800) - best_model_loss: `3.1106` -> loss: `3.1324` - peak memory: `82511 MiB` - step_avg: `999.70ms` - blocks 3-4 and 5-6 run as two parallel branches on the same input; one RMSNorm per branch, concat and a linear layer join them (layout 3/(2+2)/3, sequential depth 8); +1.18M params, same speed; much better before step 1250 (-0.08 at step 1000), 0.02-0.03 worse after; MBT inside E7b: AttnRes and the U-net 2->7 skip still go around the branches
 
-👑 Latent Lattice F107b - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> new_best_model_loss: `3.1067` - peak memory: `94160 MiB` - step_avg: `1149.82ms` - fixes the first try above: FiLM on q/k after the QK norm, Lattice params in AdamW (lr 1e-3, wd 0.1), vstream, Lattice layers 2-7; second seed: `3.1035` vs `3.1240`; +25M params (984.14M), about 15% slower per step, so at equal train time still worse than E7b (about 3.185 vs 3.1113)
+Latent Lattice F107b - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1106` -> new_best_model_loss: `3.1067` - peak memory: `94160 MiB` - step_avg: `1149.82ms` - fixes the first try above: FiLM on q/k after the QK norm, Lattice params in AdamW (lr 1e-3, wd 0.1), vstream, Lattice layers 2-7; second seed: `3.1035` vs `3.1240`; +25M params (984.14M), about 15% slower per step, so at equal train time still worse than E7b (about 3.185 vs 3.1113)
+
+👑 Latent Lattice F107e (F107b + speed flags) - [paper](https://arxiv.org/abs/2611.21608) | [explanation](./techniques/latent_lattice.md) - best_model_loss: `3.1067` -> new_best_model_loss: `3.1065` - peak memory: `81847 MiB` - step_avg: `1053.22ms` - F107b with `lattice_scan_impl="triton"` and `lattice_film_impl="bf16cat"` (pure speed options, same math): seq-switch gap 1.7 s (F107b 213.5 s), median full-length step 1019 ms (E7b 967 ms, F107b 1044 ms), 12.3 GB less peak memory than F107b; -0.0002 vs F107b is inside seed noise (~0.0024); at equal train time still worse than E7b: 3.1266 vs 3.1113 at 5106 s, and it needs 5271 s (+3.2%) to reach 3.1113; no seed-2 run because no time-matched win
 
 
 ## Other Models
@@ -320,7 +322,7 @@ Results saved to: logs/lr_finder_blagpt/lr_finder_results.pt
 
 The automatic experiment logs are in `ar/`. `ar/results.tsv` has the short runs, `ar/full_results.tsv` has the full runs, and `ar/best_config.json` has the best config.
 
-The best loss so far is `3.1067`: Latent Lattice (F107b) on top of RoPE + RoVE, the Aurora optimizer and a large Engram table.
+The best loss so far is `3.1065`: Latent Lattice (F107e = F107b with the Triton scan and bf16cat FiLM speed options) on top of RoPE + RoVE, the Aurora optimizer and a large Engram table.
 
 ## Best Model So Far
 

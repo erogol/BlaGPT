@@ -127,6 +127,8 @@ class BestConfig(GPTConfig):
     lattice_lr: float = 1e-3
     lattice_wd: float = 0.1
     lattice_vstream: bool = True
+    lattice_scan_impl: str = "triton"  # F107e speed option (no recompile at seq switch)
+    lattice_film_impl: str = "bf16cat"  # F107e speed option
 
     # KDA (off but configured)
     use_kda_interleaving: bool = False

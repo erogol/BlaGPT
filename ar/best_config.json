@@ -111,5 +111,7 @@
   "lattice_adamw": true,
   "lattice_lr": 0.001,
   "lattice_wd": 0.1,
-  "lattice_vstream": true
+  "lattice_vstream": true,
+  "lattice_scan_impl": "triton",
+  "lattice_film_impl": "bf16cat"
 }
