@@ -121,10 +121,17 @@ class Primer_MLP(nn.Module):
         self.c_proj_scale = nn.Parameter(torch.ones(config.n_embd))
 
     def forward(self, x, **kwargs):
-        x = F.linear(
-            x, (self.c_fc * self.c_fc_scale.unsqueeze(0)).type_as(x)
-        )  # fuse weight & weight_scale mults
         mod = getattr(self, "_lattice_mod", None)
+        if mod is not None and mod.film_impl == "bf16cat":
+            # F107d: shift folded into the c_fc matmul (no (B, T, ff) beta tensor).
+            r_hat = self._lattice_holder[self._lattice_key]
+            w = torch.cat([self.c_fc * self.c_fc_scale.unsqueeze(0), mod.mlp_beta.weight], dim=1)
+            x = F.linear(torch.cat([x, r_hat.type_as(x)], dim=-1), w.type_as(x))
+            mod = None
+        else:
+            x = F.linear(
+                x, (self.c_fc * self.c_fc_scale.unsqueeze(0)).type_as(x)
+            )  # fuse weight & weight_scale mults
         if mod is not None:  # F107: Lattice shift of the pre-activation
             x = mod.mlp_shift(x, self._lattice_holder[self._lattice_key])
         x = F.relu(

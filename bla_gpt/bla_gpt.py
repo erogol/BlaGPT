@@ -168,6 +168,7 @@ class GPTConfig(Coqpit):
     lattice_wd: float = 0.1  # fix 2: decay on Lattice weights, r_0, norm gains; none on biases, a_log
     lattice_vstream: bool = False  # fix 3: depth-wise readout stream (Sec. 3.2.2)
     lattice_scan_impl: str = "hs"  # F107c: "hs" (Hillis-Steele) or "triton" (CUDA; no recompile at seq switch)
+    lattice_film_impl: str = "fp32"  # F107d: "fp32" (default), "bf16" (bf16 FiLM math) or "bf16cat" (bf16 + MLP shift in c_fc)
     # F108 Multi-Branch Transformer (arXiv:2611.19800): prelude -> mbt_branches parallel branches
     # (same input H, own weights) -> concat fusion -> coda. 0 = off (bit-identical base model).
     mbt_branches: int = 0  # 0 (off) or 2
@@ -1084,6 +1085,7 @@ class GPT(nn.Module):
                 film_after_qknorm=cfg.lattice_film_after_qknorm,
                 vstream=cfg.lattice_vstream,
                 scan_impl=getattr(cfg, "lattice_scan_impl", "hs"),
+                film_impl=getattr(cfg, "lattice_film_impl", "fp32"),
             )
             mods[str(i)] = mod
             attach_lattice(attn, mlp, mod, self._lattice_holder, str(i))

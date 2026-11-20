@@ -52,9 +52,16 @@ class LatticeLayer(nn.Module):
     """Horizontal latent update, readout and modulation heads for one layer."""
 
     def __init__(self, n_embd, d_r, q_dim, kv_dim, mlp_dim, inj=True,
-                 film_after_qknorm=False, vstream=False, scan_impl="hs"):
+                 film_after_qknorm=False, vstream=False, scan_impl="hs",
+                 film_impl="fp32"):
         super().__init__()
         self.d_r = d_r
+        # F107d: "fp32" (default) = per-target fp32 FiLM; "bf16" = same heads,
+        # bf16 math; "bf16cat" = bf16 FiLM + MLP shift folded into c_fc
+        # ([x, r_hat] @ [W_fc; W_beta], see Primer_MLP.forward).
+        if film_impl not in ("fp32", "bf16", "bf16cat"):
+            raise ValueError(f"unknown lattice_film_impl {film_impl!r}")
+        self.film_impl = film_impl
         # F107c: "hs" = Hillis-Steele (default); "triton" = sequential Triton
         # custom op (CUDA only, no guard on T, no switch recompile).
         if scan_impl not in ("hs", "triton"):
@@ -162,10 +169,19 @@ class LatticeLayer(nn.Module):
     def film(self, which, x, r_hat):
         """(W x) * (1 + tanh(gamma(r_hat))) + beta(r_hat), in fp32.
 
-        x: (B, T, H, hd) projected q, k or v.
+        x: (B, T, H, hd) projected q, k or v. With film_impl "bf16"/"bf16cat"
+        the math runs in bf16.
         """
         lin = getattr(self, "film_" + which)
         B, T = x.shape[:2]
+        impl = self.film_impl
+        if impl != "fp32":
+            with torch.autocast(device_type=x.device.type, enabled=False):
+                gb = F.linear(r_hat.to(torch.bfloat16), lin.weight.to(torch.bfloat16))
+                gamma, beta = gb.chunk(2, dim=-1)
+                xb = x.to(torch.bfloat16).reshape(B, T, -1)
+                y = xb * (1.0 + torch.tanh(gamma)) + beta
+            return y.view(x.shape).to(x.dtype)
         with torch.autocast(device_type=x.device.type, enabled=False):
             gamma, beta = F.linear(r_hat, lin.weight.float()).chunk(2, dim=-1)
             y = x.float().reshape(B, T, -1) * (1.0 + torch.tanh(gamma)) + beta
@@ -173,6 +189,10 @@ class LatticeLayer(nn.Module):
 
     def mlp_shift(self, h, r_hat):
         """Add beta(r_hat) to the MLP pre-activation h (B, T, ff)."""
+        if self.film_impl != "fp32":
+            with torch.autocast(device_type=h.device.type, enabled=False):
+                beta = F.linear(r_hat.to(torch.bfloat16), self.mlp_beta.weight.to(torch.bfloat16))
+            return h + beta.to(h.dtype)
         with torch.autocast(device_type=h.device.type, enabled=False):
             beta = F.linear(r_hat, self.mlp_beta.weight.float())
         return h + beta.to(h.dtype)
