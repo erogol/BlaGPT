@@ -52,9 +52,14 @@ class LatticeLayer(nn.Module):
     """Horizontal latent update, readout and modulation heads for one layer."""
 
     def __init__(self, n_embd, d_r, q_dim, kv_dim, mlp_dim, inj=True,
-                 film_after_qknorm=False, vstream=False):
+                 film_after_qknorm=False, vstream=False, scan_impl="hs"):
         super().__init__()
         self.d_r = d_r
+        # F107c: "hs" = Hillis-Steele (default); "triton" = sequential Triton
+        # custom op (CUDA only, no guard on T, no switch recompile).
+        if scan_impl not in ("hs", "triton"):
+            raise ValueError(f"unknown lattice_scan_impl {scan_impl!r}")
+        self.scan_impl = scan_impl
         self.inj = inj
         # F107b fix 1: FiLM q/k after the per-head QK RMSNorm, before RoPE.
         self.film_after_qknorm = film_after_qknorm
@@ -123,7 +128,11 @@ class LatticeLayer(nn.Module):
             delta = F.softplus(pre_d.float())
             g = torch.exp(-torch.exp(self.a_log.float()) * delta)
             c = F.silu(pre_c.float())
-            r = lattice_scan(g, (1.0 - g) * c, self.r0)
+            if self.scan_impl == "triton":
+                from lattice_triton import lattice_scan_triton
+                r = lattice_scan_triton(g, (1.0 - g) * c, self.r0)
+            else:
+                r = lattice_scan(g, (1.0 - g) * c, self.r0)
             return _rms(r, self.norm_out_w.float())
 
     def step(self, holder, key, x):
