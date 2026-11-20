@@ -93,29 +93,17 @@ BlaGPT-specific details:
 
 ## Result
 
-Run: `F107`, on top of E7b (RoPE + RoVE, best `3.1106`), 8x H200, 5100 steps, seed 1337.
+Run: `F107b_e5`, 8x H200, 5100 steps, Engram x5, 404.64M params.
+It uses FiLM on q/k after the QK norm, Lattice params in AdamW (lr 1e-3, wd 0.1), vstream and Lattice layers 2-7.
 
-| | E7b | Latent Lattice |
+| | Seed 1337 | Seed 2 |
 |---|---|---|
-| Params | 959.35M | 979.02M (+2.1%) |
-| Final val loss | 3.1113 (best 3.1106) | **3.1139** |
-| Peak memory | 85258 MiB | 92059 MiB |
-| Step average | 1003.14ms | 1194.26ms |
-| Total train time | 5106s | 6079s |
+| Final val loss | **3.1153** | 3.1230 |
+| Step average | 732.44ms | 708.65ms |
+| Peak memory | 70569 MiB | 70569 MiB |
 
-Validation loss at the same step:
-
-| Step | E7b | Latent Lattice | Diff |
-|---|---|---|---|
-| 500 | 4.1440 | 4.0410 | -0.1030 |
-| 1000 | 4.0615 | 3.8726 | -0.1889 |
-| 1125 | 4.0650 | 3.8412 | -0.2238 |
-| 1250 | 3.6495 | 3.6514 | +0.0019 |
-| 2000 | 3.4486 | 3.4559 | +0.0073 |
-| 4000 | 3.2585 | 3.2607 | +0.0022 |
-| 5100 | 3.1113 | 3.1139 | +0.0026 |
-
-At the same wall-clock time (5106s, when E7b ends at `3.1113`), the Lattice run is at about `3.218`.
+The previous x5 best (E1c, no Lattice, GRAPE-A) is `3.1487`.
+The best config also sets `lattice_scan_impl="triton"` and `lattice_film_impl="bf16cat"`. These options change speed and memory only.
 
 ## Takeaway
 

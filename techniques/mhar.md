@@ -50,21 +50,8 @@ attn_res_heads = 8   # 1 = original Attention Residuals
 
 ## Result
 
-Full 5100-step runs on the Aurora + Engram ×20 stack (B0):
-
-| Run | Change | Seed 1337 | Seed 2 | Step avg (s1337) | Peak memory |
-|-----|--------|-----------|--------|------------------|-------------|
-| B0 | H=1 (baseline) | `3.1265` | `3.1241` | `1066ms` | `85625 MiB` |
-| E6a | H=4 | `3.1241` | — | `1143ms` | `93215 MiB` |
-| E6b | H=8 | `3.1238` | `3.1203` | `1149ms` | `93225 MiB` (seed 2) |
-| E7b | rotary + RoVE (H=1) | `3.1106` | — | `1018ms` | — |
-| Combined | E7b + H=8 | `3.1113` | — | — | `92855 MiB` |
-
-- On B0, H=8 helped on both seeds (`-0.0027`, `-0.0038`), but both gaps sit close to the ~0.0024 seed noise.
-- It costs about 8% step time and about 7,600 MiB more peak memory, against the paper's "negligible compute". The einsum path materializes a `(N, B, T, H, D/H)` stack at every block.
-- On top of rotary + RoVE (Combined), H=8 gave `+0.0007` vs E7b. The gain did not carry over to the new best stack.
-
-Not in the best config.
+The MHAR runs used the Engram x20 model, which BlaGPT no longer uses. Their results are removed.
+MHAR is not in the best config.
 
 ## Takeaway
 

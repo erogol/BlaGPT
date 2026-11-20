@@ -30,7 +30,7 @@ LAT = {"lattice_enabled": True, "lattice_layers": [1, 2, 3, 4], "lattice_dr": 32
 
 def _mk_cfg(**kw):
     cfg = GPTConfig()
-    for k, v in json.load(open(CFG_DIR / "E7b_h200_control.json")).items():
+    for k, v in json.load(open(CFG_DIR / "base_x5.json")).items():
         if hasattr(cfg, k):
             setattr(cfg, k, v)
     cfg.n_layer, cfg.n_embd, cfg.n_head, cfg.n_kv_head = 6, 128, 4, 4

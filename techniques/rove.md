@@ -59,21 +59,8 @@ Note: with `zero_init_proj_layers=True` the output projection starts at zero, so
 
 ## Result
 
-Full 5100-step runs on the Aurora + Engram ×20 stack (B0):
-
-| Run | Change | Seed 1337 | Seed 2 | Step avg (s1337) |
-|-----|--------|-----------|--------|------------------|
-| B0 | GRAPE-A (baseline) | `3.1265` | `3.1241` | `1066ms` |
-| E7a | RoPE replaces GRAPE-A | `3.1134` | `3.1250` | `993ms` |
-| **E7b** | **RoPE + RoVE** | **`3.1106`** | **`3.1240`** | **`1018ms`** |
-| E7c | GRAPE-A + RoVE (hybrid) | `3.1262` | — | `1090ms` |
-| Combined | E7b + MHAR H=8 | `3.1113` | — | — |
-
-- RoVE vs plain RoPE: `-0.0028` (seed 1337) and `-0.0010` (seed 2). Same direction on both seeds, but both gaps are below the ~0.0024 seed noise of B0.
-- Peak memory (seed-2 runs): `85258 MiB` with RoVE vs `85160 MiB` without. About 2.5% more step time in the seed-1337 runs.
-- The GRAPE-A hybrid (E7c) showed no gain. RoVE needs the RoPE score pathway to pair with.
-
-E7b is the new best and the active best config.
+RoVE is part of the current best model, F107b_e5 (Engram x5, 404.64M params): `3.1153` (seed 1337) and `3.1230` (seed 2).
+F107b_e5 also has RoPE and the Latent Lattice, so this run does not measure RoVE alone.
 
 ## Takeaway
 

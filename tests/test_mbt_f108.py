@@ -21,7 +21,7 @@ GPT = blagpt_model.GPT
 GPTConfig = blagpt_model.GPTConfig
 
 BASE_SHA = "894bc45d"  # BlaGPT main before F108
-CFG_JSON = ROOT / "ar" / "full_train" / "configs" / "E7b_h200_control.json"
+CFG_JSON = ROOT / "ar" / "full_train" / "configs" / "base_x5.json"
 
 
 @pytest.fixture(scope="module")

@@ -16,7 +16,7 @@ This directory tries to explain various techniques implemented in this repositor
 - [**Exclusive Self Attention**](./exclusive_self_attention.md) - Removes the value-direction component from attention outputs
 - [**GOAT Sink Prior**](./goat_sink_prior.md) - Per-head key-0 attention log-prior for learned sink control
 - [**GRAPE-A Query-Gated**](./grape_a_qgate.md) - Query-gated additive position bias replacing RoPE with learned content-dependent decay
-- [**RoVE**](./rove.md) - Rotary value embeddings: rotates values with RoPE so the value pathway is position-relative; current best (E7b)
+- [**RoVE**](./rove.md) - Rotary value embeddings: rotates values with RoPE so the value pathway is position-relative; part of the best model (F107b_e5)
 - [**Key-Dimension Attention (KDA)**](./kda.md) - Linear-complexity attention with fine-grained gating and delta rule
 
 ## Normalization

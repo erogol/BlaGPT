@@ -22,7 +22,7 @@ from lattice import lattice_scan, lattice_scan_ref  # noqa: E402
 
 def _mk_cfg(lattice, hyper=False, **kw):
     cfg = GPTConfig()
-    base = json.load(open(ROOT / "ar" / "full_train" / "configs" / "E7b_h200_control.json"))
+    base = json.load(open(ROOT / "ar" / "full_train" / "configs" / "base_x5.json"))
     for k, v in base.items():
         if hasattr(cfg, k):
             setattr(cfg, k, v)
@@ -104,7 +104,7 @@ def test_flag_off_bit_identical_to_base(device, hyper, tmp_path):
     with tarfile.open(tar) as t:
         t.extractall(base)
     assert (base / "bla_gpt" / "bla_gpt.py").exists()
-    cfg_json = ROOT / "ar" / "full_train" / "configs" / "E7b_h200_control.json"
+    cfg_json = ROOT / "ar" / "full_train" / "configs" / "base_x5.json"
     helper = ROOT / "tests" / "_lattice_dump.py"
     outs = []
     for tree in (base, ROOT):

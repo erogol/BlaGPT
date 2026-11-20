@@ -38,7 +38,7 @@ FIXES = {"lattice_film_after_qknorm": True, "lattice_adamw": True,
 
 def _mk_cfg(hyper=False, **kw):
     cfg = GPTConfig()
-    for k, v in json.load(open(CFG_DIR / "E7b_h200_control.json")).items():
+    for k, v in json.load(open(CFG_DIR / "base_x5.json")).items():
         if hasattr(cfg, k):
             setattr(cfg, k, v)
     cfg.n_layer, cfg.n_embd, cfg.n_head, cfg.n_kv_head = 6, 128, 4, 4
@@ -93,7 +93,7 @@ def test_fixes_off_bit_identical_to_f107(device, hyper, lattice, tmp_path):
     with tarfile.open(tar) as t:
         t.extractall(base)
     assert (base / "bla_gpt" / "lattice.py").exists()
-    cfg = json.load(open(CFG_DIR / "E7b_h200_control.json"))
+    cfg = json.load(open(CFG_DIR / "base_x5.json"))
     if lattice:
         cfg.update(LAT)
     cfg_json = tmp_path / "cfg.json"
@@ -116,17 +116,9 @@ def test_fixes_off_bit_identical_to_f107(device, hyper, lattice, tmp_path):
     assert torch.equal(la, lb)
 
 
-def test_f107_config_unchanged():
-    """F107.json carries no F107b flag, so it still runs the F107 model."""
-    f107 = json.load(open(CFG_DIR / "F107.json"))
-    assert not any(k in f107 for k in FIXES)
-    cfg = _mk_cfg()
-    assert not any(getattr(cfg, k) for k in FIXES)
-
-
 def test_f107b_configs():
-    base = json.load(open(CFG_DIR / "E7b_h200_control.json"))
-    for name, seed in (("F107b.json", 1337), ("F107b_s2.json", 2)):
+    base = json.load(open(CFG_DIR / "base_x5.json"))
+    for name, seed in (("F107b_e5.json", 1337), ("F107b_e5_s2.json", 2)):
         c = json.load(open(CFG_DIR / name))
         assert c["lattice_layers"] == [2, 3, 4, 5, 6, 7]
         assert c["lattice_dr"] == 256 and c["lattice_inj"] and c["lattice_enabled"]
