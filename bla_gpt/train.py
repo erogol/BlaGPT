@@ -234,6 +234,22 @@ def _apply_json_overrides(args: "Hyperparameters", config_path: str) -> None:
             setattr(args, key, value)
 
 
+def lf_passes(seed, step, p1) -> int:
+    """F109: passes of one update, drawn from (seed, step) as in LoRM SampledPasses, so all ranks agree."""
+    rng = np.random.default_rng([0 if seed is None else int(seed), int(step)])
+    return int(rng.choice(2, p=[p1, 1.0 - p1])) + 1
+
+
+def lf_forward(model, x, y, passes):
+    """F109 latent feedback: passes=2 runs a no-grad pass through the compiled module (no DDP)
+    for the top states, then the fed pass through `model`; loss only on the last pass."""
+    if passes == 1:
+        return model(x, y)
+    with torch.no_grad():
+        top = model.module(x, return_top=True)
+    return model(x, y, feedback=top.detach())
+
+
 def set_seed(seed) -> None:
     """Seed python/numpy/torch RNGs for repeatable model init.
 
@@ -323,7 +339,10 @@ if __name__ == "__main__":
     model = model(model_config)
     model = model.cuda()
 
+    _lf = getattr(model_config, "latent_feedback", False)
     if args.compile_model:
+        if _lf:  # F109: extra graphs (top / fed pass, two curriculum lengths, eval)
+            torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 32)
         model = torch.compile(model)
 
     model_size = (
@@ -452,7 +471,10 @@ if __name__ == "__main__":
                 for _ in range(val_steps):
                     x_val, y_val = val_loader.next_batch()
                     with ctx:  # of course, we'd like to use no_grad() here too, but that creates a torch.compile error for some reason
-                        _, loss = model(x_val, y_val)
+                        if _lf:  # F109: eval with 2 passes (LoRM FeedbackConfig default)
+                            _, loss = lf_forward(model, x_val, y_val, 2)
+                        else:
+                            _, loss = model(x_val, y_val)
                         metrics = None
                         if type(loss) is dict:
                             metrics = {k: v for k, v in loss.items() if k != "total"}
@@ -545,10 +567,14 @@ if __name__ == "__main__":
         curriculum_len = getattr(model_config, "seq_curriculum_len", T)
         use_short_sequence = curriculum_steps > 0 and step < curriculum_steps
         logit_norm_val = None
+        _lf_p = lf_passes(args.seed, step, model_config.latent_feedback_p1) if _lf else 1
         for i in range(1, train_accumulation_steps + 1):
             # forward pass
             with ctx:
-                if use_short_sequence:
+                if _lf:
+                    _xs, _ys = (x[:, :curriculum_len].contiguous(), y[:, :curriculum_len].contiguous()) if use_short_sequence else (x, y)
+                    _, loss = lf_forward(model, _xs, _ys, _lf_p)
+                elif use_short_sequence:
                     _, loss = model(
                         x[:, :curriculum_len].contiguous(),
                         y[:, :curriculum_len].contiguous(),

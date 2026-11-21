@@ -174,6 +174,10 @@ class GPTConfig(Coqpit):
     mbt_branches: int = 0  # 0 (off) or 2
     mbt_prelude: int = 3  # shared prelude blocks h[0..mbt_prelude-1]
     mbt_branch_depth: int = 2  # blocks per branch; coda = n_layer - mbt_prelude - mbt_branches * mbt_branch_depth
+    # F109 latent feedback (arXiv:2611.20404; LoRM lorm/model/feedback.py): u_t = e_t + W rms(h_{t-1}),
+    # h = top state before ln_f. Train: 1 pass w.p. latent_feedback_p1, else a no-grad pass then a fed pass. Default off.
+    latent_feedback: bool = False
+    latent_feedback_p1: float = 0.15  # LoRM configs/feedback.yaml pass_mix [0.15, 0.85]
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
@@ -886,6 +890,10 @@ class GPT(nn.Module):
             self.mbt_fuse_norms = nn.ModuleList(RMSNorm(config.n_embd, eps=1e-5) for _ in range(_mbt_k))
             self.mbt_fuse_proj = nn.Linear(_mbt_k * config.n_embd, config.n_embd, bias=False)
 
+        # F109 latent feedback fusion W (LoRM FeedbackTransformer.fusion); N(0, 0.02) via _init_weights.
+        if getattr(config, "latent_feedback", False):
+            self.lf_fusion = nn.Linear(config.n_embd, config.n_embd, bias=False)
+
         # init all weights
         self.apply(self._init_weights)
         if self.lattice is not None:
@@ -1117,7 +1125,7 @@ class GPT(nn.Module):
             outs.append(self.mbt_fuse_norms[b](z))
         return self.mbt_fuse_proj(torch.cat(outs, dim=-1))
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, feedback=None, return_top=False):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, (
@@ -1134,6 +1142,10 @@ class GPT(nn.Module):
             x = self.transformer.drop(tok_emb + pos_emb)
         else:
             x = self.transformer.drop(tok_emb)
+        if feedback is not None:
+            # F109: e_t + W rms(top_{t-1}); position 0 keeps its embedding (LoRM mix()).
+            fed = self.lf_fusion(F.rms_norm(feedback, (feedback.size(-1),), eps=1e-5))
+            x = torch.cat([x[:, :1], x[:, 1:] + fed[:, :-1]], 1)
 
         # Engram: compute n-gram embedding and store initial state for lambda mixing
         x0 = None
@@ -1237,6 +1249,8 @@ class GPT(nn.Module):
 
         if self.config.use_hyper_connections:
             x = x.sum(dim=2)
+        if return_top:
+            return x  # F109: top state before ln_f
         x = self.transformer.ln_f(x)
 
         # TODO: simplify this
