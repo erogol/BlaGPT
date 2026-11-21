@@ -43,3 +43,4 @@ E2b	c839b2e	F99	3.1558	discard	engram_mult50	bla_gpt/logs/ar_full_E2b_0/state_st
 F102a	4afe64d	F99	3.2244	discard	lm_head_sgdm_lr0.1	bla_gpt/logs/ar_full_F102a_0/state_step005100.pt	Full 5100-step run; +0.0641 vs best F99=3.1603; no confirmation because not lower
 F107b_e5	d8fd823	E1c	3.1153	keep	engram_x5_on_F107b	bla_gpt/logs/ar_full_F107b_e5_0/state_step005100.pt	Full 5100-step run; -0.0334 vs E1c=3.1487; best x5 model (x20 runs removed 2026-11-20)
 F107b_e5_s2	8fbea84	F107b_e5	3.1230	keep	engram_x5_on_F107b_seed2	bla_gpt/logs/ar_full_F107b_e5_s2_0/state_step005100.pt	Full 5100-step run; seed 2 of F107b_e5 (x20 runs removed 2026-11-20)
+F109	d45d5fe	F107b_e5	3.1601	discard	latent_feedback_p0.15_on_F107b_e5	bla_gpt/logs/ar_full_F109_0/state_step005100.pt	Full 5100-step run; +0.0448 vs best F107b_e5=3.1153; no confirmation because not lower
