@@ -23,7 +23,7 @@ torchrun --standalone --nproc_per_node=8 bla_gpt/train.py --run_name best_model 
 
 ## Progression
 
-Each row adds one change to the best model at that time. ✅ = kept, ❌ = discarded, 👑 = current best. — = not recorded in the original run.
+Each row adds one change to the best model at that time. ✅ = kept, ❌ = discarded, 👑 = current best, ⏳ = better on one seed, second seed not run yet. — = not recorded in the original run.
 
 | Technique | | Val loss | Δ | Peak MiB | ms/step | Notes |
 |---|---|---|---|---|---|---|
@@ -64,6 +64,7 @@ Each row adds one change to the best model at that time. ✅ = kept, ❌ = disca
 | Weight EMA + LR floor | ✅ | **3.1487** | -0.0116 | 61239 | 731.65 | LR decays to 15% of peak, not to 0, and eval uses the average weights of the last 300 steps; removed in F107b_e5 |
 | Token normalization for Engram<br><sub>[PR #375](https://github.com/KellerJordan/modded-nanogpt/pull/375) · [explanation](./techniques/engram.md)</sub> | ❌ | 3.1564 | -0.0039 | 59643 | 719.88 | tested on the Aurora base (3.1603), in parallel with Weight EMA + LR floor; tokens with the same first 2 bytes share one Engram entry; off by default |
 | RoPE + RoVE + Latent Lattice (F107b_e5)<br><sub>[RoPE](https://arxiv.org/abs/2104.09864) · [RoVE](https://arxiv.org/abs/2606.11275) · [Latent Lattice](https://arxiv.org/abs/2611.21608) · [explanation](./techniques/latent_lattice.md)</sub> | 👑 | **3.1153** | -0.0334 | 70569 | 732.44 | 404.64M params; RoPE + RoVE replace GRAPE-A; one recurrent latent (width 256) on layers 2-7 modulates q/k/v and the MLP (FiLM after the QK norm, Lattice params in AdamW lr 1e-3, vstream); weight EMA and LR floor removed; second seed: `3.1230` |
+| HiSA (F110A)<br><sub>[paper](https://arxiv.org/abs/2611.26363) · [code](https://github.com/ambroise-b/hisa)</sub> | ⏳ | 3.1124 | -0.0029 | 60237 | 663.60 | on F107b_e5: RoPE pair l of q·k counts only while distance × θ_l < 90° (exact per-pair Triton kernel; 62 % of the pair products kept at T=1024); one seed, needs seed 2; at RoPE base 1e4 HiSA 3.1243 = dense 3.1243 (F110B/C); ms/step not comparable with 732.44, because the F107b_e5 run had the Latent Lattice speed options off |
 
 Early techniques with no recorded loss: [Multi-token prediction](https://arxiv.org/pdf/2404.19737) · [Weight tying](https://arxiv.org/abs/1608.05859v3) · [Grouped query attention](https://arxiv.org/pdf/2305.13245) · [Capping logits](https://arxiv.org/pdf/2408.00118) · [QKV bias](https://arxiv.org/abs/2407.10671) · [Zero-init projection layer](https://arxiv.org/abs/2407.10671) · [Post and pre-RMSNorm](https://arxiv.org/pdf/2408.00118).
 
