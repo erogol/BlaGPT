@@ -85,6 +85,70 @@ class Rotary(torch.nn.Module):
         ]
 
 
+def hisa_thresholds(base, head_dim, angle_deg):
+    """F110 HiSA (arXiv 2611.26363) integer windows L_l = ceil(Phi / theta_l), theta_l = base^(-2l/d)
+    (float64), so for an integer distance D: D < L_l <=> D * theta_l < Phi. int32 [d/2]."""
+    l = torch.arange(head_dim // 2, dtype=torch.float64)
+    theta = float(base) ** (-2.0 * l / head_dim)
+    if not math.isfinite(angle_deg):
+        return torch.full(theta.shape, 1 << 30, dtype=torch.int32)
+    return torch.ceil(math.radians(angle_deg) / theta).clamp(max=1 << 30).to(torch.int32)
+
+
+def hisa_rho(T, base, head_dim=64, angle_deg=90.0):
+    """Kept fraction of the causal dot product (paper eq. 5)."""
+    L = hisa_thresholds(base, head_dim, angle_deg).double().clamp(max=T)
+    kept = (L * T - L * (L - 1) / 2).sum()  # sum_{D<L} (T - D)
+    return float(kept / (head_dim // 2) / (T * (T + 1) / 2))
+
+
+def hisa_reference(q, k, v, L, sink=None):
+    """Readable HiSA (eq. 3) on rotated q, k [B, H, T, d] (half-split pairs l, l + d/2), v [B, H, T, d].
+    sink: optional per-head logit added at key 0 (GOAT). Returns softmax(s) v."""
+    B, H, T, d = q.shape
+    P = d // 2
+    D = torch.arange(T, device=q.device)
+    D = D[:, None] - D[None, :]
+    s = torch.zeros(B, H, T, T, device=q.device, dtype=torch.float32)
+    for l in range(P):
+        idx = [l, l + P]
+        part = q[..., idx].float() @ k[..., idx].float().transpose(-2, -1)
+        s = s + part * ((D >= 0) & (D < int(L[l]))).to(s.dtype)
+    s = s / math.sqrt(d)
+    if sink is not None:
+        s[:, :, :, 0] = s[:, :, :, 0] + sink.float()[None, :, None]
+    keep = (D >= 0) & (D < int(L.max()))
+    s = s.masked_fill(~keep, float("-inf"))
+    return (torch.softmax(s, dim=-1) @ v.float()).to(v.dtype)
+
+
+def hisa_attention(q, k, v, L, Lmax, sink=None):
+    """HiSA attention: exact-rule Triton kernel on CUDA (head_dim 64), reference otherwise.
+    L: int32 thresholds [d/2] (on q's device), Lmax = max(L) as a Python int (the reach).
+    The GOAT sink logit u on key 0 is applied as a correction of the kernel's output:
+    with p0 = exp(s_i0 - lse_i), o' = (o + (e^u - 1) p0 v0) / (1 + (e^u - 1) p0)."""
+    if not q.is_cuda:
+        return hisa_reference(q, k, v, L, sink)
+    from hisa_triton import hisa_triton_exact
+
+    o, lse2 = hisa_triton_exact(q, k, v, L)
+    if sink is None:
+        return o
+    T, d = q.size(2), q.size(-1)
+    P = d // 2
+    i = torch.arange(T, device=q.device)
+    pm = (i[:, None] < L[None, :]).float()  # [T, P] pairs kept at distance i to key 0
+    qf, k0 = q.float(), k[:, :, :1, :].float()
+    prod = qf * k0  # [B, H, T, d]
+    s0 = ((prod[..., :P] + prod[..., P:]) * pm).sum(-1) / math.sqrt(d)  # [B, H, T]
+    live = i < Lmax  # key 0 still in reach (always true when T <= Lmax)
+    lse = torch.where(live, lse2 * math.log(2.0), s0)  # finite exponent on dead rows (no inf * 0 grads)
+    p0 = torch.where(live, torch.exp(s0 - lse), torch.zeros_like(s0))
+    a = (torch.exp(sink.float())[None, :, None] - 1.0) * p0
+    y = (o.float() + a[..., None] * v[:, :, :1, :].float()) / (1.0 + a[..., None])
+    return y.to(o.dtype)
+
+
 class SimplifiedRotary(torch.nn.Module):
     """Simplified RoPE using concatenation instead of 2D rotations.
 
@@ -293,6 +357,16 @@ class Attention(nn.Module):
                     f"got {config.pos_encoding!r}."
                 )
             self.rove_rotary = Rotary(self.head_dim, base=config.rope_theta)
+
+        # F110 HiSA (arXiv 2611.26363): exact per-pair rule on the QK dot product. Off by default;
+        # off adds no buffer and no code path (bit-identical to the base).
+        self.hisa = bool(getattr(config, "hisa", False))
+        if self.hisa:
+            if not (config.pos_encoding == "rotary" and getattr(config, "rope_variant", "standard") == "standard"):
+                raise ValueError("hisa=True requires pos_encoding='rotary', rope_variant='standard'")
+            L = hisa_thresholds(config.rope_theta, self.head_dim, getattr(config, "hisa_angle_deg", 90.0))
+            self.register_buffer("hisa_L", L, persistent=False)
+            self.hisa_Lmax = int(L.max())
 
         # Regularization
         self.attn_dropout = nn.Dropout(config.dropout)
@@ -506,6 +580,8 @@ class Attention(nn.Module):
         return bias.masked_fill(causal[None, None], float("-inf"))
 
     def _flash_attention(self, q, k, v):
+        if self.hisa:
+            return hisa_attention(q, k, v, self.hisa_L, self.hisa_Lmax)
         if hasattr(self, "grape_bias"):
             T_q, T = q.size(2), k.size(2)
             return torch.nn.functional.scaled_dot_product_attention(
@@ -589,6 +665,11 @@ class GOATSinkAttention(ExclusiveSelfAttention):
         self.sink_prior = nn.Parameter(torch.zeros(self.n_head))
 
     def _flash_attention(self, q, k, v):
+        if self.hisa:
+            if hasattr(self, "grape_bias"):
+                raise ValueError("hisa=True does not support grape_bias")
+            y = hisa_attention(q, k, v, self.hisa_L, self.hisa_Lmax, sink=self.sink_prior)
+            return self._apply_exclusion(y, v)
         T_q, T = q.size(2), k.size(2)
         # Combined causal + sink-prior additive mask
         mask = torch.zeros(1, self.n_head, T_q, T, device=q.device, dtype=q.dtype)

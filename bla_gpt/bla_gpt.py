@@ -178,6 +178,10 @@ class GPTConfig(Coqpit):
     # h = top state before ln_f. Train: 1 pass w.p. latent_feedback_p1, else a no-grad pass then a fed pass. Default off.
     latent_feedback: bool = False
     latent_feedback_p1: float = 0.15  # LoRM configs/feedback.yaml pass_mix [0.15, 0.85]
+    # F110 HiSA (arXiv 2611.26363): keep RoPE pair l of the QK dot product only while (i-j)*theta_l < Phi.
+    # Exact per-pair rule (Triton kernel, head_dim 64). Default off (bit-identical base model).
+    hisa: bool = False
+    hisa_angle_deg: float = 90.0
 
     # Engram: N-gram hash memory lookup
     # Variants: "ngram_lambda" (model-level lambda mixing), "simple" (SimpleEngram), "minimal" (MinimalEngram)
