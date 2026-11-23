@@ -1,0 +1,1 @@
+step:5100/5100 val_loss:3.1124 train_time:3377744ms step_avg:663.60ms

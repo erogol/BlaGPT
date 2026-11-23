@@ -1,0 +1,6 @@
+started_utc=2026-11-23T11:02:40Z
+git_commit=18f26c339ac84410f5f73342aa6288244a74bc48
+run_name=ar_full_F110A
+config=ar/full_runs/F110A/config.json
+exit_code=0
+checkpoint_dir=bla_gpt/logs/ar_full_F110A_0
