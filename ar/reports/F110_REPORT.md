@@ -7,7 +7,19 @@ The project owner approved the run on 2026-11-23 10:10 UTC. One epoch = the stan
 **Push pending.** The mission sandbox cannot push. Commits 18f26c33..HEAD are on local `main` of push-repo.
 The parent session must push them (plain fast-forward on origin/main 187cb7de, no force).
 
-## Verdict
+## Final verdict after the F110D control (2026-11-23)
+
+- **HiSA has no proven gain at T=1024.** F110D = dense, RoPE base 1e6, seed 1337, same code and config as F110A
+  except `hisa` (config is a byte copy of F107b_e5.json; run at 538d4750 on node g375).
+- F110D: val_loss **3.1147**, step_avg 671.95 ms, train_time 3420242 ms, peak 58478 MiB.
+- Gain = F110D − F110A = 3.1147 − 3.1124 = **+0.0023**, inside seed noise 0.0024. No seed-2 runs (rule and project decision).
+- Equal wall time: at the end of F110A (3377744 ms), F110D is at 3.1181, so HiSA is 0.0057 lower (one seed; HiSA is 1.2 % faster per step).
+- F110D vs F107b_e5 (3.1153): the Latent Lattice speed options change the loss by only 0.0006.
+- Val loss by step, F110A vs F110D (D − A): step 1000 +0.2937, 1250 +0.0156, 1500 +0.0050, 2000 +0.0007,
+  3000 +0.0035, 4000 +0.0021, 5000 +0.0023, 5100 +0.0023.
+- The "Confound for A" and the open decision 2 below are now resolved by F110D.
+
+## Verdict (before F110D)
 
 - **A (HiSA, base 1e6): keep by the rule, but the second seed is not run.** A gives 3.1124. The bar is 3.1153.
   A is 0.0029 lower. Seed noise is 0.0024, so A passes by 0.0005 only. A seed-2 run is a decision for the project owner. I did not run it.
