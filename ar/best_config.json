@@ -113,5 +113,7 @@
   "lattice_wd": 0.1,
   "lattice_vstream": true,
   "lattice_scan_impl": "triton",
-  "lattice_film_impl": "bf16cat"
+  "lattice_film_impl": "bf16cat",
+  "hisa": true,
+  "hisa_angle_deg": 90.0
 }

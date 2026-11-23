@@ -41,6 +41,8 @@ class BestConfig(GPTConfig):
     use_pre_post_norm: bool = False  # from Qwen, for better training stability
     rope_theta: float = 1000000  # 1000000.0 in llama3 models
     rope_variant: str = "standard"
+    hisa: bool = True  # F110A: HiSA exact per-pair RoPE sparsity (arXiv 2611.26363)
+    hisa_angle_deg: float = 90.0
     use_per_token_output_bias: bool = (
         False  # use an embedding layer to add a bias to each token prediction
     )

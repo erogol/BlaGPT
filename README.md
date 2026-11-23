@@ -7,10 +7,10 @@ Each new idea goes on top of the best config. It stays only if the final val los
 
 | Item | Value |
 |---|---|
-| **Val loss** | **3.1153** (5100 steps, 8x H200) |
+| **Val loss** | **3.1124** (5100 steps, 8x H200, one seed) |
 | **Model** | 10 layers, d=768, 404.64M params (193M of them in the Engram table) |
-| **Main parts** | Latent Lattice · RoPE + RoVE · Aurora optimizer · Engram (vocab ×5) |
-| **Speed** | 732 ms/step, peak 70,569 MiB per GPU |
+| **Main parts** | Latent Lattice · RoPE + RoVE + HiSA · Aurora optimizer · Engram (vocab ×5) |
+| **Speed** | 664 ms/step, peak 60,237 MiB per GPU |
 | **Config** | [`best_model_config.py`](./bla_gpt/best_model_config.py) · [`ar/best_config.json`](./ar/best_config.json) |
 
 ```bash
@@ -63,8 +63,8 @@ Each row adds one change to the best model at that time. ✅ = kept, ❌ = disca
 | Aurora Optimizer<br><sub>[paper](https://arxiv.org/abs/2606.27715) · [explanation](./techniques/aurora.md)</sub> | ✅ | **3.1603** | -0.0294 | 59643 | 721.25 | replaces Muon, `learning_rate=0.03` |
 | Weight EMA + LR floor | ✅ | **3.1487** | -0.0116 | 61239 | 731.65 | LR decays to 15% of peak, not to 0, and eval uses the average weights of the last 300 steps; removed in F107b_e5 |
 | Token normalization for Engram<br><sub>[PR #375](https://github.com/KellerJordan/modded-nanogpt/pull/375) · [explanation](./techniques/engram.md)</sub> | ❌ | 3.1564 | -0.0039 | 59643 | 719.88 | tested on the Aurora base (3.1603), in parallel with Weight EMA + LR floor; tokens with the same first 2 bytes share one Engram entry; off by default |
-| RoPE + RoVE + Latent Lattice (F107b_e5)<br><sub>[RoPE](https://arxiv.org/abs/2104.09864) · [RoVE](https://arxiv.org/abs/2606.11275) · [Latent Lattice](https://arxiv.org/abs/2611.21608) · [explanation](./techniques/latent_lattice.md)</sub> | 👑 | **3.1153** | -0.0334 | 70569 | 732.44 | 404.64M params; RoPE + RoVE replace GRAPE-A; one recurrent latent (width 256) on layers 2-7 modulates q/k/v and the MLP (FiLM after the QK norm, Lattice params in AdamW lr 1e-3, vstream); weight EMA and LR floor removed; second seed: `3.1230` |
-| HiSA (F110A)<br><sub>[paper](https://arxiv.org/abs/2611.26363) · [code](https://github.com/ambroise-b/hisa)</sub> | ❌ | 3.1124 | -0.0029 | 60237 | 663.60 | on F107b_e5: RoPE pair l of q·k counts only while distance × θ_l < 90° (exact per-pair Triton kernel; 62 % of the pair products kept at T=1024); dense control at the same code (F110D) gives 3.1147, so HiSA gains only 0.0023 (inside seed noise 0.0024): no proven gain; at RoPE base 1e4 HiSA 3.1243 = dense 3.1243 (F110B/C); ms/step not comparable with 732.44, because the F107b_e5 run had the Latent Lattice speed options off (F110D dense with them: 671.95) |
+| RoPE + RoVE + Latent Lattice (F107b_e5)<br><sub>[RoPE](https://arxiv.org/abs/2104.09864) · [RoVE](https://arxiv.org/abs/2606.11275) · [Latent Lattice](https://arxiv.org/abs/2611.21608) · [explanation](./techniques/latent_lattice.md)</sub> | ✅ | **3.1153** | -0.0334 | 70569 | 732.44 | 404.64M params; RoPE + RoVE replace GRAPE-A; one recurrent latent (width 256) on layers 2-7 modulates q/k/v and the MLP (FiLM after the QK norm, Lattice params in AdamW lr 1e-3, vstream); weight EMA and LR floor removed; second seed: `3.1230` |
+| HiSA (F110A)<br><sub>[paper](https://arxiv.org/abs/2611.26363) · [code](https://github.com/ambroise-b/hisa)</sub> | 👑 | **3.1124** | -0.0029 | 60237 | 663.60 | on F107b_e5: RoPE pair l of q·k counts only while distance × θ_l < 90° (exact per-pair Triton kernel; 62 % of the pair products kept at T=1024); one seed only; dense control at the same code (F110D) gives 3.1147, so the gain over dense is 0.0023, inside seed noise 0.0024; 1.2 % faster per step than dense, +1.8 GB peak memory; at RoPE base 1e4 HiSA 3.1243 = dense 3.1243 (F110B/C); ms/step not comparable with 732.44, because the F107b_e5 run had the Latent Lattice speed options off |
 
 Early techniques with no recorded loss: [Multi-token prediction](https://arxiv.org/pdf/2404.19737) · [Weight tying](https://arxiv.org/abs/1608.05859v3) · [Grouped query attention](https://arxiv.org/pdf/2305.13245) · [Capping logits](https://arxiv.org/pdf/2408.00118) · [QKV bias](https://arxiv.org/abs/2407.10671) · [Zero-init projection layer](https://arxiv.org/abs/2407.10671) · [Post and pre-RMSNorm](https://arxiv.org/pdf/2408.00118).
 
