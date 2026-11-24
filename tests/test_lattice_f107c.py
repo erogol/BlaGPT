@@ -42,7 +42,7 @@ def test_unknown_scan_impl_raises():
 @cuda
 @pytest.mark.parametrize("T", [1, 7, 384, 1024])
 def test_triton_scan_matches_ref(T):
-    from lattice_triton import lattice_scan_triton
+    from kernels.lattice_triton import lattice_scan_triton
     g, b, r0 = _inputs(4, T, 256)
     go = torch.randn_like(g)
     ref = _fwd_bwd(lattice.lattice_scan_ref, g, b, r0, go)
@@ -70,7 +70,7 @@ def test_switch_recompile(impl, max_frames):
     hs bounds T by its pass count (258..512), so 1024 adds a third frame.
     """
     from torch._dynamo.testing import CompileCounter
-    from lattice_triton import lattice_scan_triton
+    from kernels.lattice_triton import lattice_scan_triton
     fn = lattice_scan_triton if impl == "triton" else lattice.lattice_scan
     torch._dynamo.reset()
     cnt = CompileCounter()

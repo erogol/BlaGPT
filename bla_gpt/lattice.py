@@ -136,7 +136,7 @@ class LatticeLayer(nn.Module):
             g = torch.exp(-torch.exp(self.a_log.float()) * delta)
             c = F.silu(pre_c.float())
             if self.scan_impl == "triton":
-                from lattice_triton import lattice_scan_triton
+                from kernels.lattice_triton import lattice_scan_triton
                 r = lattice_scan_triton(g, (1.0 - g) * c, self.r0)
             else:
                 r = lattice_scan(g, (1.0 - g) * c, self.r0)

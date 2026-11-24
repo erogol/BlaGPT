@@ -145,7 +145,7 @@ def compute_top_loss(model, x, idx, targets):
     extended_seq = torch.cat([idx, targets[:, :window_size]], dim=1)
     
     # Generate TOP targets - use optimized implementation  
-    from top_kernels import get_top_target_fn
+    from kernels.top_kernels import get_top_target_fn
     force_optimized = getattr(model.config, 'top_force_optimized', True)
     target_fn = get_top_target_fn(force_optimized=force_optimized)
     top_targets = target_fn(extended_seq, model.config.vocab_size, window_size)

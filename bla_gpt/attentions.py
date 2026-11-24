@@ -129,7 +129,7 @@ def hisa_attention(q, k, v, L, Lmax, sink=None):
     with p0 = exp(s_i0 - lse_i), o' = (o + (e^u - 1) p0 v0) / (1 + (e^u - 1) p0)."""
     if not q.is_cuda:
         return hisa_reference(q, k, v, L, sink)
-    from hisa_triton import hisa_triton_exact
+    from kernels.hisa_triton import hisa_triton_exact
 
     o, lse2 = hisa_triton_exact(q, k, v, L)
     if sink is None:

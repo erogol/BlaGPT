@@ -27,7 +27,7 @@ from modules.pattention import Pattention
 from norms import DyTNorm, GatedNorm, LayerNorm, PreAffineRMSNorm, RMSNorm
 from torch.nn import functional as F
 try:
-    from attn_res_triton import attn_res_mix_3way_triton
+    from kernels.attn_res_triton import attn_res_mix_3way_triton
 except ImportError:
     attn_res_mix_3way_triton = None
 
