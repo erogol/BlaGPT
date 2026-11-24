@@ -107,6 +107,7 @@ class BestConfig(GPTConfig):
     # Value residual + attention residual + U-net skips
     use_value_residual: bool = True
     use_attn_res: bool = True
+    attn_res_split_qkv: bool = True  # F111A: 3-way AttnRes split Q/K/V depth routing (arXiv:2502.06785)
     use_unet_skips: bool = True
     unet_skip_init: float = 0.25
 
