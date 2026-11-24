@@ -175,3 +175,29 @@ def test_finite_gradients_on_all_attn_res_weights(attention):
     for n, p in m.named_parameters():
         if p.grad is not None:
             assert torch.isfinite(p.grad).all(), f"{n} has non-finite grad"
+
+
+def test_triton_flag_default_off_and_cpu_fallback_matches_pytorch():
+    assert GPTConfig().attn_res_split_qkv_triton is False
+
+    m_pt = _make_model(attn_res_split_qkv=True)
+    cfg_tri = _tiny_cfg(attn_res_split_qkv=True)
+    cfg_tri.attn_res_split_qkv_triton = True
+    m_tri = GPT(cfg_tri)
+    m_tri.load_state_dict(m_pt.state_dict())
+
+    with torch.no_grad():
+        m_pt.attn_res_w_k.fill_(0.25)
+        m_pt.attn_res_w_v.fill_(-0.25)
+        m_tri.attn_res_w_k.fill_(0.25)
+        m_tri.attn_res_w_v.fill_(-0.25)
+
+    m_pt.eval()
+    m_tri.eval()
+    x, y = _batch()
+    with torch.no_grad():
+        l_pt, loss_pt = m_pt(x, y)
+        l_tri, loss_tri = m_tri(x, y)
+    assert torch.equal(l_pt, l_tri)
+    assert torch.equal(loss_pt, loss_tri)
+

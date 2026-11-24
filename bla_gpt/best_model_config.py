@@ -108,6 +108,7 @@ class BestConfig(GPTConfig):
     use_value_residual: bool = True
     use_attn_res: bool = True
     attn_res_split_qkv: bool = True  # F111A: 3-way AttnRes split Q/K/V depth routing (arXiv:2502.06785)
+    attn_res_split_qkv_triton: bool = True  # F111 speed option: fused Triton 3-way AttnRes kernel (same math, -35ms/step)
     use_unet_skips: bool = True
     unet_skip_init: float = 0.25
 

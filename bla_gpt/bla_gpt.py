@@ -26,6 +26,10 @@ from modules.canon_layer import CanonLayer
 from modules.pattention import Pattention
 from norms import DyTNorm, GatedNorm, LayerNorm, PreAffineRMSNorm, RMSNorm
 from torch.nn import functional as F
+try:
+    from attn_res_triton import attn_res_mix_3way_triton
+except ImportError:
+    attn_res_mix_3way_triton = None
 
 #
 # Model Configs
@@ -140,6 +144,7 @@ class GPTConfig(Coqpit):
     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
     attn_res_heads: int = 1  # Multi-Head Attention Residuals (arXiv:2607.27230): split the depth-routing query into H groups, each with its own softmax over depth. H=1 is exactly the original single-head routing.
     attn_res_split_qkv: bool = False  # F111: 3-way AttnRes split Q/K/V depth routing (inspired by DeepCrossAttention arXiv:2502.06785). Default off.
+    attn_res_split_qkv_triton: bool = False  # F111 speed option: fused Triton kernel for 3-way AttnRes depth mix (CUDA, H=1). Default off.
     use_goat_sink_prior: bool = False  # GOAT key-only sink prior (arXiv:2601.15380, Litman & Guo, 2026)
     use_pre_affine_norm: bool = False  # PreAffineRMSNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.3
     use_gated_norm: bool = False  # GatedNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.4
@@ -1180,6 +1185,13 @@ class GPT(nn.Module):
 
         _attn_res = getattr(self.config, "use_attn_res", False) and not self.config.use_hyper_connections
         _split_qkv = _attn_res and getattr(self.config, "attn_res_split_qkv", False)
+        _split_qkv_triton = (
+            _split_qkv
+            and getattr(self.config, "attn_res_split_qkv_triton", False)
+            and x.is_cuda
+            and getattr(self.config, "attn_res_heads", 1) == 1
+            and not getattr(self.config, "use_oasis_depth_softmax1", False)
+        )
         _ar_bs = getattr(self.config, "attn_res_block_size", 0)
         if getattr(self.config, "use_embed_value_residual", False):
             self._ev_res_holder["e"] = F.rms_norm(x, (x.size(-1),))
@@ -1218,10 +1230,16 @@ class GPT(nn.Module):
             if _attn_res:
                 _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
                 _w = self.attn_res_w[layer_idx]
-                x = self._attn_res_mix(_srcs, _w)
-                if _split_qkv:
-                    x_k = self._attn_res_mix(_srcs, self.attn_res_w_k[layer_idx])
-                    x_v = self._attn_res_mix(_srcs, self.attn_res_w_v[layer_idx])
+                if _split_qkv_triton:
+                    assert attn_res_mix_3way_triton is not None, "attn_res_triton not available"
+                    x, x_k, x_v = attn_res_mix_3way_triton(
+                        _srcs, _w, self.attn_res_w_k[layer_idx], self.attn_res_w_v[layer_idx]
+                    )
+                else:
+                    x = self._attn_res_mix(_srcs, _w)
+                    if _split_qkv:
+                        x_k = self._attn_res_mix(_srcs, self.attn_res_w_k[layer_idx])
+                        x_v = self._attn_res_mix(_srcs, self.attn_res_w_v[layer_idx])
             if _unet_skips is not None and layer_idx >= _n_layers // 2:
                 _unet_delta = self.skip_weights[layer_idx - _n_layers // 2] * _unet_skips[_n_layers - 1 - layer_idx]
                 x = x + _unet_delta

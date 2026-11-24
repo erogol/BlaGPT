@@ -116,5 +116,6 @@
   "lattice_film_impl": "bf16cat",
   "hisa": true,
   "hisa_angle_deg": 90.0,
-  "attn_res_split_qkv": true
+  "attn_res_split_qkv": true,
+  "attn_res_split_qkv_triton": true
 }
