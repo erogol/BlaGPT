@@ -139,6 +139,7 @@ class GPTConfig(Coqpit):
     use_tapered_mlp: bool = False  # Tapered LMs (arXiv:2606.23670): cosine-taper per-layer Primer MLP width, budget-preserving
     use_attn_res: bool = False  # Attention Residuals (Kimi/MoonshotAI): softmax attention over prior layer outputs instead of additive residual stream
     attn_res_heads: int = 1  # Multi-Head Attention Residuals (arXiv:2607.27230): split the depth-routing query into H groups, each with its own softmax over depth. H=1 is exactly the original single-head routing.
+    attn_res_split_qkv: bool = False  # F111: 3-way AttnRes split Q/K/V depth routing (inspired by DeepCrossAttention arXiv:2502.06785). Default off.
     use_goat_sink_prior: bool = False  # GOAT key-only sink prior (arXiv:2601.15380, Litman & Guo, 2026)
     use_pre_affine_norm: bool = False  # PreAffineRMSNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.3
     use_gated_norm: bool = False  # GatedNorm: Qiu et al. 2026 (arXiv:2601.22966) Sec.3.4
@@ -528,9 +529,17 @@ class Block(nn.Module):
             return res_weight * x + branch_out
         return x + branch_out
 
-    def forward(self, x, **kwargs):
-        # Attention branch (doesn't need kwargs)
-        x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1)
+    def forward(self, x, x_k=None, x_v=None, **kwargs):
+        # Attention branch (only passes x_k/x_v when split Q/K/V depth routing is active)
+        if x_k is None and x_v is None:
+            x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1)
+        else:
+            attn_kwargs = {}
+            if x_k is not None:
+                attn_kwargs["x_k"] = self.ln_1(x_k)
+            if x_v is not None:
+                attn_kwargs["x_v"] = self.ln_1(x_v)
+            x = self._process_branch(x, self.ln_1, self.attn, self.ln_3, self.res_w1, **attn_kwargs)
 
         # MLP branch - pass kwargs through
         x = self._process_branch(x, self.ln_2, self.mlp, self.ln_4, self.res_w2, **kwargs)
@@ -996,6 +1005,9 @@ class GPT(nn.Module):
     def _init_attn_res(self):
         if getattr(self.config, "use_attn_res", False):
             self.attn_res_w = nn.Parameter(torch.zeros(self.config.n_layer + 1, self.config.n_embd))
+            if getattr(self.config, "attn_res_split_qkv", False):
+                self.attn_res_w_k = nn.Parameter(torch.zeros(self.config.n_layer, self.config.n_embd))
+                self.attn_res_w_v = nn.Parameter(torch.zeros(self.config.n_layer, self.config.n_embd))
 
     def _attn_res_route(self, scores):
         # OASIS depth-Softmax1 (Luo et al., 2026; arXiv:2605.17887):
@@ -1167,6 +1179,7 @@ class GPT(nn.Module):
             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
 
         _attn_res = getattr(self.config, "use_attn_res", False) and not self.config.use_hyper_connections
+        _split_qkv = _attn_res and getattr(self.config, "attn_res_split_qkv", False)
         _ar_bs = getattr(self.config, "attn_res_block_size", 0)
         if getattr(self.config, "use_embed_value_residual", False):
             self._ev_res_holder["e"] = F.rms_norm(x, (x.size(-1),))
@@ -1200,12 +1213,21 @@ class GPT(nn.Module):
                     if _attn_res:
                         _ar_vs.append(x)  # the source is F itself, not F - H
                 continue
+            x_k = None
+            x_v = None
             if _attn_res:
                 _srcs = (_ar_blocks + [_ar_partial]) if _ar_bs > 0 else _ar_vs
                 _w = self.attn_res_w[layer_idx]
                 x = self._attn_res_mix(_srcs, _w)
+                if _split_qkv:
+                    x_k = self._attn_res_mix(_srcs, self.attn_res_w_k[layer_idx])
+                    x_v = self._attn_res_mix(_srcs, self.attn_res_w_v[layer_idx])
             if _unet_skips is not None and layer_idx >= _n_layers // 2:
-                x = x + self.skip_weights[layer_idx - _n_layers // 2] * _unet_skips[_n_layers - 1 - layer_idx]
+                _unet_delta = self.skip_weights[layer_idx - _n_layers // 2] * _unet_skips[_n_layers - 1 - layer_idx]
+                x = x + _unet_delta
+                if _split_qkv:
+                    x_k = x_k + _unet_delta
+                    x_v = x_v + _unet_delta
             # Apply engram based on variant
             if self.engram is not None:
                 if self.config.use_hyper_connections:
@@ -1217,8 +1239,15 @@ class GPT(nn.Module):
                     x = x_reduced.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
                 elif self.engram_variant == "ngram_lambda":
                     x = self.engram.mix_at_layer(x, x0, x0_ngram, layer_idx)
+                    if _split_qkv:
+                        x_k = self.engram.mix_at_layer(x_k, x0, x0_ngram, layer_idx)
+                        x_v = self.engram.mix_at_layer(x_v, x0, x0_ngram, layer_idx)
                 else:  # "simple" or "minimal"
-                    x = x + self.engram(x, idx)
+                    _eng_delta = self.engram(x, idx)
+                    x = x + _eng_delta
+                    if _split_qkv:
+                        x_k = x_k + _eng_delta
+                        x_v = x_v + _eng_delta
             if (
                 self.lattice is not None
                 and not self.config.use_hyper_connections
@@ -1228,7 +1257,10 @@ class GPT(nn.Module):
                 self._lattice_update(str(layer_idx), x)
             if _attn_res:
                 _h_in = x
-                x = block(x, token_ids=idx)
+                if _split_qkv:
+                    x = block(x, token_ids=idx, x_k=x_k, x_v=x_v)
+                else:
+                    x = block(x, token_ids=idx)
                 if _ar_bs > 0:
                     _ar_partial = _ar_partial + (x - _h_in)
                     if (layer_idx + 1) % _ar_bs == 0:

@@ -394,7 +394,7 @@ class Attention(nn.Module):
         # Output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
 
-    def forward(self, x, q=None, mask=None):
+    def forward(self, x, q=None, mask=None, x_k=None, x_v=None):
         B, T, C = x.size()
         T_q = q.size(1) if q is not None else T
 
@@ -406,7 +406,15 @@ class Attention(nn.Module):
 
         # Project inputs
         q = self._project_query(q if q is not None else x, B, T_q)
-        k, v = self._project_kv(x, B, T)
+        if x_k is None and x_v is None:
+            k, v = self._project_kv(x, B, T)
+        else:
+            k, v = self._project_kv_split(
+                x_k if x_k is not None else x,
+                x_v if x_v is not None else x,
+                B,
+                T,
+            )
 
         # Apply normalization and rotary embeddings if configured
         if hasattr(self, "q_norm"):
@@ -459,6 +467,18 @@ class Attention(nn.Module):
     def _project_kv(self, x, B, T):
         kv = self.kv_proj(x).view(B, T, 2, self.n_kv_head, self.head_dim)
         k, v = kv.unbind(dim=2)
+        k = self._lattice_film("k", k)
+        v = self._lattice_film("v", v)
+        v = self._apply_embed_value_residual(v, B, T)
+        v = self._apply_value_residual(v)
+        return k, v
+
+    def _project_kv_split(self, x_k, x_v, B, T):
+        half = self.kv_proj.out_features // 2
+        b_k = None if self.kv_proj.bias is None else self.kv_proj.bias[:half]
+        b_v = None if self.kv_proj.bias is None else self.kv_proj.bias[half:]
+        k = F.linear(x_k, self.kv_proj.weight[:half], b_k).view(B, T, self.n_kv_head, self.head_dim)
+        v = F.linear(x_v, self.kv_proj.weight[half:], b_v).view(B, T, self.n_kv_head, self.head_dim)
         k = self._lattice_film("k", k)
         v = self._lattice_film("v", v)
         v = self._apply_embed_value_residual(v, B, T)
@@ -1529,9 +1549,9 @@ class ComposableGatedAttention(GOATSinkAttention):
         nn.init.zeros_(self.gate_proj.weight)
         self._x_input = None
 
-    def forward(self, x, q=None, mask=None):
+    def forward(self, x, q=None, mask=None, x_k=None, x_v=None):
         self._x_input = x
-        return super().forward(x, q, mask)
+        return super().forward(x, q, mask, x_k=x_k, x_v=x_v)
 
     def _flash_attention(self, q, k, v):
         y = super()._flash_attention(q, k, v)
@@ -1576,9 +1596,9 @@ class AffineScaledAttention(GOATSinkAttention):
         self.register_buffer("alpha_ma", torch.full((self.n_head,), 0.5))
         self._x_input = None
 
-    def forward(self, x, q=None, mask=None):
+    def forward(self, x, q=None, mask=None, x_k=None, x_v=None):
         self._x_input = x
-        return super().forward(x, q, mask)
+        return super().forward(x, q, mask, x_k=x_k, x_v=x_v)
 
     def _flash_attention(self, q, k, v):
         # Affine scaling modifies post-softmax weights: manual path required.
