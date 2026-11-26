@@ -142,11 +142,12 @@ class Primer_MLP(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, ff_dim=None):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        hidden_dim = 4 * config.n_embd if ff_dim is None else int(ff_dim)
+        self.c_fc = nn.Linear(config.n_embd, hidden_dim, bias=config.bias)
         self.gelu = nn.GELU()
-        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.c_proj = nn.Linear(hidden_dim, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x, **kwargs):

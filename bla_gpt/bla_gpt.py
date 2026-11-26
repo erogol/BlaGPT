@@ -245,6 +245,30 @@ class GPTConfig(Coqpit):
         }
     )
 
+    # F112: LoomFormer (arXiv:2611.30634) dual-stream rewirable circuits
+    use_loom: bool = False
+    loom_d_k: int = 24
+    loom_d_r: int = 144
+    loom_rope_dim: int = 16
+    loom_m_shift: bool = True
+    loom_ffn_x_dim: int = 0
+    loom_ffn_m_dim: int = 0
+    loom_last_ffn_x_dim: int = 0
+    loom_ffn_m_ratio: float = 1.0 / 3.0
+    loom_init_std: float = 0.006
+    loom_read_gate_init: float = 0.05
+    loom_static_read_gate_init: float = 0.99
+    loom_write_gate_init: float = 0.1
+    loom_m_shift_init: float = 0.5
+    loom_read_key_scale: float = 0.1
+    loom_read_key_eps: float = 1e-4
+    loom_write_eps: float = 1e-6
+    loom_rms_eps: float = 1e-6
+    loom_clone_vo_init: bool = True
+    loom_adamw: bool = True
+    loom_lr: float = 1e-3
+    loom_wd: float = 0.1
+
     # This is dumb and needs to change 🧑‍🔬
     def is_kda_layer(self, layer_idx: int) -> bool:
         return (layer_idx + 1) % self.kda_interleave_ratio != 0
@@ -447,7 +471,7 @@ def get_norm(config):
     raise ValueError(f"Unrecognized norm type {config.norm_layer}")
 
 
-def get_mlp(config, layer_idx=None):
+def get_mlp(config, layer_idx=None, ff_dim=None):
     # Check if this layer should use STEM
     if layer_idx is not None and config.is_stem_layer(layer_idx):
         return STEM_MLP(config)
@@ -457,12 +481,14 @@ def get_mlp(config, layer_idx=None):
 
     # Standard MLP selection
     if config.activation == "gelu":
-        return MLP(config)
+        return MLP(config, ff_dim=ff_dim)
     elif config.activation == "geglu":
         return GeGLU_MLP(config)
     elif config.activation == "swiglu":
         return SwiGLU_MLP(config)
     elif config.activation == "primer":
+        if ff_dim is not None:
+            return Primer_MLP(config, ff_dim=ff_dim)
         if getattr(config, "use_tapered_mlp", False) and layer_idx is not None:
             base_d_ff = getattr(config, "mlp_expand", 4) * config.n_embd
             layer_dims = tapered_mlp_dims(base_d_ff, config.n_layer)
@@ -796,8 +822,26 @@ class GPT(nn.Module):
         elif "use_per_layer_token_emb" in config and config.use_per_layer_token_emb:
             _Block = BlockWithTokenEmbedding
 
-        # Create transformer blocks with weight sharing support
-        if config.enable_weight_sharing:
+        # Create transformer blocks (LoomFormer or standard with weight sharing)
+        self.loom_embed_write = None
+        if getattr(config, "use_loom", False):
+            from loom import LoomBlock, LoomEmbedWrite, resolve_loom_ffn_dims
+
+            assert not config.enable_weight_sharing, "use_loom is incompatible with enable_weight_sharing"
+            assert not config.use_hyper_connections, "use_loom is incompatible with use_hyper_connections"
+            assert not getattr(config, "use_attn_res", False), "use_loom is incompatible with use_attn_res"
+            assert not getattr(config, "use_unet_skips", False), "use_loom is incompatible with use_unet_skips"
+            assert not getattr(config, "use_value_residual", False), "use_loom is incompatible with use_value_residual"
+            assert getattr(config, "mbt_branches", 0) == 0, "use_loom is incompatible with mbt_branches"
+            ffn_x_dim, ffn_m_dim, last_ffn_x_dim = resolve_loom_ffn_dims(config)
+            blocks = []
+            for d in range(config.n_layer):
+                is_last = d == config.n_layer - 1
+                ffn_x = get_mlp(config, d, ff_dim=last_ffn_x_dim if is_last else ffn_x_dim)
+                ffn_m = None if is_last else get_mlp(config, d, ff_dim=ffn_m_dim)
+                blocks.append(LoomBlock(config, d, get_norm(config), get_norm(config), ffn_x, ffn_m))
+            self.loom_embed_write = LoomEmbedWrite(config)
+        elif config.enable_weight_sharing:
             # Create unique blocks for each group
             unique_blocks = {}
             for group_id in set(config.weight_sharing_pattern):
@@ -937,6 +981,11 @@ class GPT(nn.Module):
         if _mbt_k > 0:
             # Paper App. A.8: output-layer init 0.02/sqrt(2L), after the global init.
             torch.nn.init.normal_(self.mbt_fuse_proj.weight, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
+        if self.loom_embed_write is not None:
+            # F112: restore LoomFormer Appendix D.1 port/gate init after global _init_weights.
+            self.loom_embed_write.reset_loom_parameters()
+            for block in self.transformer.h:
+                block.reset_loom_parameters()
 
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
@@ -1180,6 +1229,8 @@ class GPT(nn.Module):
             self._lattice_holder["e"] = F.rms_norm(x, (x.size(-1),)) if self.config.lattice_inj else None
             self._lattice_holder["s"] = None  # F107b vstream: zero seed
 
+        M_loom = self.loom_embed_write(x) if self.loom_embed_write is not None else None
+
         if self.config.use_hyper_connections:
             x = x.unsqueeze(2).expand(-1, -1, self.config.hyper_num_streams, -1).contiguous()
 
@@ -1286,6 +1337,8 @@ class GPT(nn.Module):
                         _ar_partial = torch.zeros_like(_ar_partial)
                 else:
                     _ar_vs.append(x - _h_in)
+            elif M_loom is not None:
+                x, M_loom = block(x, M_loom, token_ids=idx)
             else:
                 x = block(x, token_ids=idx)
             if _muddformer:

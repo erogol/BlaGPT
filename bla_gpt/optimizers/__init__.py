@@ -25,6 +25,35 @@ def _lattice_adamw_groups(model: torch.nn.Module) -> list:
     ]
 
 
+def _loom_adamw_groups(model: torch.nn.Module) -> list:
+    """F112: AdamW groups for LoomFormer port/gate params, or [] when off.
+
+    Decay (loom_wd) on 2D port/gate weights; no decay on biases, scales, or
+    q_bar (LoomFormer paper App. D.1). Main projection matrices stay on Aurora.
+    """
+    cfg = getattr(model, "config", None)
+    if not getattr(cfg, "use_loom", False) or not getattr(cfg, "loom_adamw", False):
+        return []
+    decay, nodecay = [], []
+    seen = set()
+    for name, p in model.named_parameters():
+        if not getattr(p, "_loom_adamw", False) or id(p) in seen:
+            continue
+        seen.add(id(p))
+        if p.ndim < 2 or name.endswith(".bias") or getattr(p, "_no_weight_decay", False):
+            nodecay.append(p)
+        else:
+            decay.append(p)
+    if not decay and not nodecay:
+        return []
+    groups = []
+    if decay:
+        groups.append(dict(params=decay, lr=cfg.loom_lr, adamw_wd=cfg.loom_wd, loom=True))
+    if nodecay:
+        groups.append(dict(params=nodecay, lr=cfg.loom_lr, adamw_wd=0.0, loom=True))
+    return groups
+
+
 def describe_update_paths(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -248,9 +277,9 @@ def get_optimizer(
                 break
         # F107b fix 2: Lattice params leave Aurora and the shared AdamW
         # backup and get their own AdamW groups (paper App. A.4.1).
-        lattice_groups = _lattice_adamw_groups(model)
-        if lattice_groups:
-            ids = {id(p) for g in lattice_groups for p in g["params"]}
+        extra_adamw_groups = _lattice_adamw_groups(model) + _loom_adamw_groups(model)
+        if extra_adamw_groups:
+            ids = {id(p) for g in extra_adamw_groups for p in g["params"]}
             aurora_params = [p for p in aurora_params if id(p) not in ids]
             adamw_params = [p for p in adamw_params if id(p) not in ids]
         opt = optimizer(
@@ -261,7 +290,7 @@ def get_optimizer(
             sgd_m_lr=lm_head_sgd_lr,
             **optimizer_params
         )
-        for g in lattice_groups:
+        for g in extra_adamw_groups:
             opt.add_param_group(g)  # missing keys come from Aurora defaults
             for p in g["params"]:
                 opt.state[p]["use_aurora"] = False
